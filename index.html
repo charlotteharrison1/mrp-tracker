@@ -218,7 +218,8 @@
     // found by inspection: "Workers" hashed into a teal too close to Grn.
     "Workers": "#6D2130", "WPB": "#6D2130", "Workers Party": "#6D2130",
     "TUSC": "#B23A6B",
-    "UKIP": "#722282"
+    "UKIP": "#722282",
+    "Speaker": "#2B2B2B"
   };
   // Deterministic fallback palette for every other party code seen in the
   // data (minor/local parties) — distinct hues, not asserted as official
@@ -390,11 +391,20 @@
       return body;
     }
     var idx = colIndex(COLS.ge2024);
+    var sorted = rows.slice().sort(function (a, b) { return (a[idx.rank] || 99) - (b[idx.rank] || 99); });
     body += '<div class="stat-row">';
-    rows.forEach(function (r) {
+    sorted.forEach(function (r) {
       body += '<div class="stat">' + partyChip(r[idx.party]) + '<strong>' + fmtPct(r[idx.vote_share_pct]) + '</strong></div>';
     });
-    body += "</div></section>";
+    body += "</div>";
+    body += "<table><thead><tr><th>Rank</th><th>Candidate</th><th>Party</th><th>Votes</th><th>Share</th></tr></thead><tbody>";
+    sorted.forEach(function (r) {
+      body += "<tr><td>" + r[idx.rank] + "</td><td>" + escapeHtml(r[idx.candidate_name]) + "</td><td>" + partyChip(r[idx.party]) +
+        "</td><td>" + (r[idx.votes] == null ? "—" : r[idx.votes].toLocaleString()) + "</td><td>" + fmtPct(r[idx.vote_share_pct]) + "</td></tr>";
+    });
+    body += "</tbody></table>";
+    body += '<p>' + sourceLink(sorted[0][idx.source_url], "Official result — electionresults.parliament.uk") + "</p>";
+    body += "</section>";
     return body;
   }
 

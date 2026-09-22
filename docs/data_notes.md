@@ -80,6 +80,31 @@ is for whichever session (or agent) picks this project up next.
   as of this session only 20 councils have a 2026 LEAP CSV at all. Re-check
   `data/leap_council_index.csv` for a `year=2026` row before concluding a
   given council is missing data we could otherwise fetch.
+- **Phase 3 (GE2024) loaded, with two bugs caught before it shipped.**
+  Source: `electionresults.parliament.uk/general-elections/6/candidacies.csv`
+  (official House of Commons Library results DB — the Commons Library's own
+  briefing page, commonslibrary.parliament.uk, 403s on a plain fetch, but
+  this underlying data site doesn't, no UA spoofing needed). 4,515 candidate
+  rows, all 650 constituencies backfilled.
+  1. `ge2024_results`' original schema had `PRIMARY KEY (pcon_code, party)`
+     — broke immediately since 100 constituencies have >1 independent
+     candidate, all coded `party='Ind'`. Fixed by adding `candidate_name`
+     to the key (and a `source_url` column) — safe schema change since the
+     table was still empty.
+  2. The Speaker's seat (Chorley, Lindsay Hoyle) has both `Main party
+     abbreviation` and `Main party name` blank in the source — he's not
+     coded as "independent" either, since he stands as "Speaker seeking
+     re-election," a distinct category. `08_ingest_ge2024_results.py` first
+     mapped this to `party='Unknown'`, then was fixed to check the source's
+     own `Candidate is standing as Commons Speaker` flag and use `'Speaker'`
+     — but since `party` is part of the primary key, re-running after that
+     fix inserted a *new* row instead of replacing the old `Unknown` one,
+     leaving a stale duplicate (4,516 rows instead of 4,515) until caught by
+     comparing the loader's own printed count against the exported JSON's
+     count. The script now does a full `DELETE FROM ge2024_results` before
+     each load instead of upserting, since it always loads the whole
+     dataset in one pass anyway — upserting only makes sense when a
+     normalisation rule can change a row's key, which happened here.
 - **LEAP CSV column order isn't stable across eras.** Modern exports
   (confirmed on Westminster 2022) are
   `council, ward, "", ward_code(GSS), candidate, party, votes, status` —

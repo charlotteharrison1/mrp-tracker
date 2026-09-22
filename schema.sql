@@ -196,10 +196,12 @@ CREATE TABLE IF NOT EXISTS senedd2021_to_pcon24_crosswalk (
 CREATE TABLE IF NOT EXISTS ge2024_results (
     pcon_code       TEXT NOT NULL REFERENCES constituencies(pcon_code),
     party           TEXT NOT NULL,
+    candidate_name  TEXT NOT NULL,  -- part of the key: >1 candidate per seat can share party='Ind'
     votes           INTEGER,
     vote_share_pct  REAL,
     rank            INTEGER,
-    PRIMARY KEY (pcon_code, party)
+    source_url      TEXT,           -- per-constituency electionresults.parliament.uk page
+    PRIMARY KEY (pcon_code, party, candidate_name)
 );
 
 -- ---------------------------------------------------------------------------

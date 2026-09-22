@@ -47,10 +47,11 @@ def fetch_constituencies(con):
 
 def fetch_ge2024(con):
     by_pcon = defaultdict(list)
-    for pcon, party, share, rank in con.execute(
-        "SELECT pcon_code, party, vote_share_pct, rank FROM ge2024_results ORDER BY pcon_code, rank"
+    for pcon, party, candidate, votes, share, rank, source_url in con.execute(
+        """SELECT pcon_code, party, candidate_name, votes, vote_share_pct, rank, source_url
+           FROM ge2024_results ORDER BY pcon_code, rank"""
     ):
-        by_pcon[pcon].append([party, share, rank])
+        by_pcon[pcon].append([party, candidate, votes, share, rank, source_url])
     return by_pcon
 
 
@@ -141,7 +142,7 @@ def main():
         "meta": {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "columns": {
-                "ge2024": ["party", "vote_share_pct", "rank"],
+                "ge2024": ["party", "candidate_name", "votes", "vote_share_pct", "rank", "source_url"],
                 "mrp": ["pollster", "publish_date", "party", "vote_share_pct", "rank", "win_probability_pct", "source_url"],
                 "local_council": ["la_name", "election_date", "party", "avg_vote_share_pct", "n_wards", "source_url"],
                 "local_wards": ["la_name", "ward_name", "ward_code", "election_date", "party",
