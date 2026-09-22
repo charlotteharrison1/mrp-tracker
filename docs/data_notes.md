@@ -105,6 +105,23 @@ is for whichever session (or agent) picks this project up next.
      each load instead of upserting, since it always loads the whole
      dataset in one pass anyway — upserting only makes sense when a
      normalisation rule can change a row's key, which happened here.
+- **Fuzzy constituency-name matching (`04_ingest_mrp_release.py`,
+  `scripts/prep_electoral_calculus_xlsx.py`) had a real collision bug**:
+  `rapidfuzz.fuzz.WRatio` scores "Devon South West" equally (95) against
+  both "South Devon" and "South West Devon" — two genuinely different real
+  seats — because WRatio leans on subset-containment logic that can't tell
+  "same tokens, different order" from "some tokens missing." Left alone,
+  this would have silently written one pollster's numbers for "South West
+  Devon" onto "South Devon" instead (or vice versa, depending on dict/list
+  ordering). Fixed by taking WRatio's top candidates within 3 points of
+  each other and re-ranking those specifically by `token_sort_ratio` (which
+  requires the same token *set*, so it correctly prefers the exact match) —
+  token_sort_ratio isn't used as the primary scorer because it wrongly
+  penalises genuine subset matches like "Hull East" -> "Kingston upon Hull
+  East" (drops to 56 vs WRatio's 90). **If any other release's constituency
+  names produce a suspiciously identical score for two candidates, that's
+  this bug pattern recurring — check with token_sort_ratio, don't just
+  trust the top WRatio hit.**
 - **LEAP CSV column order isn't stable across eras.** Modern exports
   (confirmed on Westminster 2022) are
   `council, ward, "", ward_code(GSS), candidate, party, votes, status` —

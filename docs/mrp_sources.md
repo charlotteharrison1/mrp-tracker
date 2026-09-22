@@ -15,7 +15,7 @@ Add rows as you find more — this list (seeded from initial research, Sept
 | More in Common (Senedd) | — | Apr 2026 | moreincommon.org.uk/research-type/mrp/ | not started |
 | More in Common (Holyrood) | — | Apr 2026 | moreincommon.org.uk/research-type/mrp/ | not started |
 | Electoral Calculus | PLMR | ~Apr 2026 | electoralcalculus.co.uk/blogs/ | not started |
-| Electoral Calculus | PLMR | Jul 2026 | electoralcalculus.co.uk/blogs/ec_vipoll_20260708.html | not started |
+| Electoral Calculus | PLMR | Jul 2026 | electoralcalculus.co.uk/blogs/ec_vipoll_20260708.html | **ingested** (release_id=1, 2026-09-22) — GB only (no NI), loaded the "No TV" scenario via `scripts/prep_electoral_calculus_xlsx.py` + `04_ingest_mrp_release.py`; the tactically-adjusted "With TV" variant in the same file wasn't loaded, re-run prep with `--with-tv` if wanted |
 | Find Out Now / Electoral Calculus | — | 2026 (Scotland) | electionanalysis.uk cites this — check Electoral Calculus site | not started |
 | JL Partners | Telegraph | 2026 (Scotland, Wales) | check Telegraph / JL Partners site — note known D'Hondt application error flagged by electionanalysis.uk, treat cautiously | not started |
 | Survation | — | check survation.com | not started |

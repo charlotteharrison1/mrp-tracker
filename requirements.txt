@@ -5,3 +5,4 @@ lxml>=5.0
 rapidfuzz>=3.6        # fuzzy name matching (ward names, constituency names across sources)
 tqdm>=4.66
 python-dateutil>=2.9
+openpyxl>=3.1          # MRP releases are commonly published as .xlsx (e.g. Electoral Calculus)

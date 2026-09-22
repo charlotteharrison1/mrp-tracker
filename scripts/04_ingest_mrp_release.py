@@ -44,11 +44,32 @@ ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "uk_elections.db"
 
 MATCH_THRESHOLD = 90  # rapidfuzz score 0-100; below this, flagged for manual review
+TIE_MARGIN = 3         # WRatio candidates within this many points of the top score are tie-broken
 
 
 def load_constituency_lookup(con):
     rows = con.execute("SELECT pcon_code, pcon_name FROM constituencies").fetchall()
     return {name: code for code, name in rows}, [name for _, name in rows]
+
+
+def best_match(query, names):
+    """WRatio alone confuses genuine near-duplicates: 'Devon South West' scores
+    95 against BOTH 'South Devon' and 'South West Devon' (subset containment
+    scores it can't tell apart), and would silently pick whichever sorts
+    first. Within a small margin of the top score, re-rank by
+    token_sort_ratio instead, which requires the same token SET (so it
+    correctly prefers the exact-token match) — but isn't used as the primary
+    scorer because it wrongly penalises genuine subset matches like
+    'Hull East' -> 'Kingston upon Hull East' (drops to 56 vs WRatio's 90).
+    See docs/data_notes.md 2026-09-22."""
+    results = process.extract(query, names, scorer=fuzz.WRatio, limit=5)
+    if not results:
+        return None, 0
+    top_score = results[0][1]
+    contenders = [r for r in results if r[1] >= top_score - TIE_MARGIN]
+    if len(contenders) > 1:
+        contenders.sort(key=lambda r: fuzz.token_sort_ratio(query, r[0]), reverse=True)
+    return contenders[0][0], top_score
 
 
 def main():
@@ -95,7 +116,7 @@ def main():
         pcon_name = row.get("pcon_name", "").strip()
 
         if not pcon_code and pcon_name:
-            match, score, _ = process.extractOne(pcon_name, all_names, scorer=fuzz.WRatio)
+            match, score = best_match(pcon_name, all_names)
             if score >= MATCH_THRESHOLD:
                 pcon_code = name_to_code[match]
             else:
