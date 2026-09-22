@@ -70,6 +70,16 @@ is for whichever session (or agent) picks this project up next.
      loaded, revisit this join** — it should probably prefer the vintage
      whose year is closest to (at or before) the election year, not just
      "any vintage, any ward_code."
+- **If a constituency's local election data looks stuck at an old year, check
+  before assuming it's a bug.** 101 councils had 2022 as their most recent
+  loaded election; only 3 (Birmingham, Camden, Wandsworth) were a real gap
+  (fixed above — 2026 just hadn't been fetched). The other 98 are correct:
+  Scottish and Welsh councils elect on a 5-year cycle (2022→2027, so 2022
+  genuinely is current), and most English councils that held all-out
+  elections in 2026 haven't had their results transcribed onto LEAP yet —
+  as of this session only 20 councils have a 2026 LEAP CSV at all. Re-check
+  `data/leap_council_index.csv` for a `year=2026` row before concluding a
+  given council is missing data we could otherwise fetch.
 - **LEAP CSV column order isn't stable across eras.** Modern exports
   (confirmed on Westminster 2022) are
   `council, ward, "", ward_code(GSS), candidate, party, votes, status` —

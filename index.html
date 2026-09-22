@@ -44,6 +44,7 @@
     --note-border: #c9a300;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
     font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
@@ -51,8 +52,12 @@
     color: var(--text-primary);
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
   header {
+    flex-shrink: 0;
     padding: 1rem clamp(1rem, 3vw, 2rem);
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -69,7 +74,8 @@
   }
   .layout {
     display: flex;
-    min-height: calc(100vh - 60px);
+    flex: 1;
+    min-height: 0;
   }
   #sidebar {
     width: 340px;
@@ -77,8 +83,9 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
+    min-height: 0;
   }
-  #search-wrap { padding: 0.75rem; border-bottom: 1px solid var(--border); }
+  #search-wrap { flex-shrink: 0; padding: 0.75rem; border-bottom: 1px solid var(--border); }
   #search {
     width: 100%; padding: 0.5rem 0.7rem; font-size: 0.95rem;
     border: 1px solid var(--border); border-radius: 6px;
@@ -91,7 +98,7 @@
     color: var(--text-secondary); cursor: pointer;
   }
   #filters button.active { background: var(--accent); color: white; border-color: var(--accent); }
-  #list { overflow-y: auto; flex: 1; }
+  #list { overflow-y: auto; flex: 1; min-height: 0; }
   #list button.item {
     display: block; width: 100%; text-align: left; padding: 0.55rem 0.9rem;
     border: none; border-bottom: 1px solid var(--border); background: none;
@@ -108,6 +115,7 @@
   main {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     padding: clamp(1rem, 3vw, 2rem);
     overflow-y: auto;
   }
@@ -142,6 +150,27 @@
   .stat-row .stat { font-size: 0.85rem; color: var(--text-secondary); }
   .stat-row .stat strong { color: var(--text-primary); font-size: 1.1rem; display: block; }
   footer-note { display: block; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.78rem; }
+  a.source-link {
+    color: var(--text-muted); font-size: 0.76rem; text-decoration: none;
+    border-bottom: 1px dotted var(--text-muted); white-space: nowrap;
+  }
+  a.source-link:hover { color: var(--accent); border-color: var(--accent); }
+  th.source-col, td.source-col { width: 1%; }
+  .chart-wrap { position: relative; padding: 0.8rem 0.8rem 0; background: var(--surface-raised); }
+  .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart-line { fill: none; stroke-width: 2; }
+  .chart-dot { stroke-width: 1.5; stroke: var(--surface-raised); }
+  .chart-axis { stroke: var(--border); stroke-width: 1; }
+  .chart-axis-label { fill: var(--text-muted); font-size: 9px; }
+  .chart-crosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 2; pointer-events: none; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 0.15rem 0.9rem; padding: 0.5rem 0.8rem 0.7rem; font-size: 0.76rem; }
+  .chart-tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.4rem 0.55rem; font-size: 0.76rem; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    white-space: nowrap; z-index: 5; visibility: hidden;
+  }
+  .chart-tooltip .tt-date { color: var(--text-muted); margin-bottom: 0.2rem; }
+  .chart-tooltip .tt-row { display: flex; align-items: center; gap: 0.35rem; }
   @media (max-width: 720px) {
     .layout { flex-direction: column; }
     #sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 45vh; }
@@ -183,12 +212,19 @@
     "RUK": "#12B6CF", "Reform": "#12B6CF", "Reform UK": "#12B6CF",
     "SNP": "#EDB700",
     "PC": "#3F8428", "Plaid Cymru": "#3F8428",
-    "Ind": "#8a877d", "Independent": "#8a877d"
+    "Ind": "#8a877d", "Independent": "#8a877d",
+    // Not verified official brand hex, just explicit (not hashed) so these
+    // frequently-recurring parties never collide with Green/Reform/etc —
+    // found by inspection: "Workers" hashed into a teal too close to Grn.
+    "Workers": "#6D2130", "WPB": "#6D2130", "Workers Party": "#6D2130",
+    "TUSC": "#B23A6B",
+    "UKIP": "#722282"
   };
   // Deterministic fallback palette for every other party code seen in the
   // data (minor/local parties) — distinct hues, not asserted as official
-  // brand colours, just a stable, distinguishable identity per code.
-  var FALLBACK_HUES = ["#4a3aa7", "#e87ba4", "#8a5a2b", "#1baf7a", "#b23a6b", "#6d6d1a", "#3a6d8a", "#9a4a1a"];
+  // brand colours, just a stable, distinguishable identity per code. Kept
+  // clear of green/red/blue/cyan/yellow families already used above.
+  var FALLBACK_HUES = ["#4a3aa7", "#e87ba4", "#8a5a2b", "#5c6bc0", "#9a4a1a", "#6d6d1a", "#7b4173", "#a8763e"];
   var fallbackCache = {};
   function hashCode(s) {
     var h = 0;
@@ -344,6 +380,7 @@
     els.detail.innerHTML = html;
     els.detail.scrollTop = 0;
     wireWardDetailToggles(d.local_wards);
+    mountTrendCharts(d.local_council);
   }
 
   function renderGe2024(rows) {
@@ -361,6 +398,12 @@
     return body;
   }
 
+  function sourceLink(url, label) {
+    if (!url) return '<span class="text-muted">—</span>';
+    return '<a class="source-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' +
+      escapeHtml(label || "source") + " ↗</a>";
+  }
+
   function renderMrp(rows) {
     var body = "<section><h2>MRP projections over time</h2>";
     if (!rows.length) {
@@ -376,7 +419,7 @@
       if (!releases[key]) { releases[key] = []; order.push(key); }
       releases[key].push(r);
     });
-    body += "<table><thead><tr><th>Date</th><th>Pollster</th><th>Parties (vote share)</th></tr></thead><tbody>";
+    body += "<table><thead><tr><th>Date</th><th>Pollster</th><th>Parties (vote share)</th><th>Source</th></tr></thead><tbody>";
     order.forEach(function (key) {
       var group = releases[key].slice().sort(function (a, b) { return (a[idx.rank] || 99) - (b[idx.rank] || 99); });
       var first = group[0];
@@ -384,7 +427,7 @@
         return partyChip(r[idx.party]) + " " + fmtPct(r[idx.vote_share_pct]);
       }).join(" &nbsp; ");
       body += "<tr><td>" + escapeHtml(first[idx.publish_date]) + "</td><td>" + escapeHtml(first[idx.pollster]) +
-        "</td><td>" + spread + "</td></tr>";
+        "</td><td>" + spread + "</td><td class=\"source-col\">" + sourceLink(first[idx.source_url]) + "</td></tr>";
     });
     body += "</tbody></table></section>";
     return body;
@@ -417,11 +460,13 @@
         if (a[idx.election_date] !== b[idx.election_date]) return a[idx.election_date] < b[idx.election_date] ? 1 : -1;
         return b[idx.avg_vote_share_pct] - a[idx.avg_vote_share_pct];
       });
-      body += '<div class="council-block"><h3>' + escapeHtml(la) + "</h3>";
-      body += "<table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th># wards</th></tr></thead><tbody>";
+      body += '<div class="council-block"><h3>' + escapeHtml(la) + " — party vote share over time</h3>";
+      body += '<div class="chart-wrap" data-chart-la="' + escapeHtml(la) + '"></div>';
+      body += "<table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th># wards</th><th>Source</th></tr></thead><tbody>";
       rows.forEach(function (r) {
         body += "<tr><td>" + fmtDate(r[idx.election_date]) + "</td><td>" + partyChip(r[idx.party]) +
-          "</td><td>" + fmtPct(r[idx.avg_vote_share_pct]) + "</td><td>" + r[idx.n_wards] + "</td></tr>";
+          "</td><td>" + fmtPct(r[idx.avg_vote_share_pct]) + "</td><td>" + r[idx.n_wards] +
+          "</td><td class=\"source-col\">" + sourceLink(r[idx.source_url]) + "</td></tr>";
       });
       body += "</tbody></table>";
 
@@ -459,6 +504,167 @@
         html += "</tbody></table>";
         det.querySelector(".ward-detail-body").innerHTML = html;
       });
+    });
+  }
+
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS(SVG_NS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+  function niceCeil(v) {
+    // Vote shares are 0-100 — round up to the nearest 10 for good vertical
+    // resolution (a generic log-scale "nice number" rounder jumps too far,
+    // e.g. 83 -> 100, wasting half the chart on empty space).
+    return Math.max(10, Math.min(100, Math.ceil(v / 10) * 10));
+  }
+
+  function mountTrendCharts(localCouncilRows) {
+    var idx = colIndex(COLS.local_council);
+    Array.prototype.forEach.call(document.querySelectorAll(".chart-wrap[data-chart-la]"), function (wrap) {
+      var la = wrap.getAttribute("data-chart-la");
+      var rows = localCouncilRows.filter(function (r) { return r[idx.la_name] === la; });
+      buildTrendChart(wrap, rows, idx);
+    });
+  }
+
+  function buildTrendChart(container, rows, idx) {
+    var dates = [];
+    rows.forEach(function (r) { if (dates.indexOf(r[idx.election_date]) === -1) dates.push(r[idx.election_date]); });
+    dates.sort();
+    if (dates.length < 2) {
+      container.innerHTML = '<p class="placeholder" style="padding:0.5rem 0;">Need at least two elections here to chart a trend — see the table below.</p>';
+      return;
+    }
+    var times = dates.map(function (d) { return new Date(d + "T00:00:00Z").getTime(); });
+    var t0 = times[0], t1 = times[times.length - 1];
+    var span = Math.max(t1 - t0, 1);
+
+    // party -> array of {ti (index into dates), share}
+    var byParty = {};
+    rows.forEach(function (r) {
+      var di = dates.indexOf(r[idx.election_date]);
+      var party = r[idx.party];
+      if (!byParty[party]) byParty[party] = [];
+      byParty[party].push({ di: di, share: r[idx.avg_vote_share_pct] });
+    });
+    var parties = Object.keys(byParty).sort(function (a, b) {
+      var maxA = Math.max.apply(null, byParty[a].map(function (p) { return p.share || 0; }));
+      var maxB = Math.max.apply(null, byParty[b].map(function (p) { return p.share || 0; }));
+      return maxB - maxA;
+    });
+    var maxShare = 0;
+    parties.forEach(function (p) { byParty[p].forEach(function (pt) { if (pt.share > maxShare) maxShare = pt.share; }); });
+    var yMax = niceCeil(maxShare * 1.15);
+
+    var W = 640, H = 220, ML = 32, MR = 12, MT = 12, MB = 22;
+    var plotW = W - ML - MR, plotH = H - MT - MB;
+    function xOf(di) { return ML + (times[di] - t0) / span * plotW; }
+    function yOf(share) { return MT + plotH - (share / yMax) * plotH; }
+
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none" });
+
+    // gridlines + y labels (0, mid, max)
+    [0, yMax / 2, yMax].forEach(function (v) {
+      var y = yOf(v);
+      svg.appendChild(svgEl("line", { class: "chart-axis", x1: ML, x2: W - MR, y1: y, y2: y }));
+      var t = svgEl("text", { class: "chart-axis-label", x: 2, y: y + 3 });
+      t.textContent = Math.round(v) + "%";
+      svg.appendChild(t);
+    });
+    // x axis line + date labels
+    svg.appendChild(svgEl("line", { class: "chart-axis", x1: ML, x2: W - MR, y1: MT + plotH, y2: MT + plotH }));
+    dates.forEach(function (d, di) {
+      var x = xOf(di);
+      svg.appendChild(svgEl("line", { class: "chart-axis", x1: x, x2: x, y1: MT + plotH, y2: MT + plotH + 3 }));
+      var t = svgEl("text", { class: "chart-axis-label", x: x, y: H - 4, "text-anchor": di === 0 ? "start" : (di === dates.length - 1 ? "end" : "middle") });
+      t.textContent = d.slice(0, 4);
+      svg.appendChild(t);
+    });
+
+    // one path per contiguous run of consecutive-date points, per party
+    parties.forEach(function (p) {
+      var pts = byParty[p].slice().sort(function (a, b) { return a.di - b.di; });
+      var color = partyColour(p);
+      var run = [];
+      function flush() {
+        if (run.length > 1) {
+          var d = run.map(function (pt, i) { return (i === 0 ? "M" : "L") + xOf(pt.di) + "," + yOf(pt.share); }).join(" ");
+          svg.appendChild(svgEl("path", { class: "chart-line", d: d, stroke: color }));
+        }
+        run.forEach(function (pt) {
+          svg.appendChild(svgEl("circle", { class: "chart-dot", cx: xOf(pt.di), cy: yOf(pt.share), r: 3.5, fill: color }));
+        });
+        run = [];
+      }
+      pts.forEach(function (pt, i) {
+        if (i > 0 && pt.di !== pts[i - 1].di + 1) flush();
+        run.push(pt);
+      });
+      flush();
+    });
+
+    var crosshair = svgEl("line", { class: "chart-crosshair", x1: 0, x2: 0, y1: MT, y2: MT + plotH, visibility: "hidden" });
+    svg.appendChild(crosshair);
+
+    var tooltip = document.createElement("div");
+    tooltip.className = "chart-tooltip";
+    container.innerHTML = "";
+    container.appendChild(svg);
+    container.appendChild(tooltip);
+
+    var legend = document.createElement("div");
+    legend.className = "chart-legend";
+    parties.forEach(function (p) {
+      var item = document.createElement("span");
+      item.className = "party";
+      item.innerHTML = '<span class="swatch" style="background:' + partyColour(p) + '"></span>' + escapeHtml(p);
+      legend.appendChild(item);
+    });
+    container.appendChild(legend);
+
+    function nearestDateIndex(mouseX) {
+      var best = 0, bestDist = Infinity;
+      dates.forEach(function (d, di) {
+        var dist = Math.abs(xOf(di) - mouseX);
+        if (dist < bestDist) { bestDist = dist; best = di; }
+      });
+      return best;
+    }
+
+    svg.addEventListener("mousemove", function (evt) {
+      var pt = svg.createSVGPoint();
+      pt.x = evt.clientX; pt.y = evt.clientY;
+      var loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      var di = nearestDateIndex(loc.x);
+      var x = xOf(di);
+      crosshair.setAttribute("x1", x); crosshair.setAttribute("x2", x);
+      crosshair.setAttribute("visibility", "visible");
+
+      var rowsAtDate = parties
+        .map(function (p) { var m = byParty[p].filter(function (pt2) { return pt2.di === di; })[0]; return m ? { p: p, share: m.share } : null; })
+        .filter(Boolean)
+        .sort(function (a, b) { return b.share - a.share; });
+
+      var html = '<div class="tt-date">' + escapeHtml(dates[di]) + "</div>";
+      rowsAtDate.forEach(function (r) {
+        html += '<div class="tt-row"><span class="swatch" style="background:' + partyColour(r.p) + '"></span>' +
+          escapeHtml(r.p) + " " + fmtPct(r.share) + "</div>";
+      });
+      tooltip.innerHTML = html;
+      tooltip.style.visibility = "visible";
+
+      var wrapRect = container.getBoundingClientRect();
+      var left = evt.clientX - wrapRect.left + 12;
+      var top = evt.clientY - wrapRect.top - 10;
+      if (left + 140 > wrapRect.width) left = evt.clientX - wrapRect.left - 150;
+      tooltip.style.left = left + "px";
+      tooltip.style.top = top + "px";
+    });
+    svg.addEventListener("mouseleave", function () {
+      crosshair.setAttribute("visibility", "hidden");
+      tooltip.style.visibility = "hidden";
     });
   }
 

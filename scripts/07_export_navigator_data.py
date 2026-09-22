@@ -56,14 +56,14 @@ def fetch_ge2024(con):
 
 def fetch_mrp(con):
     by_pcon = defaultdict(list)
-    for pcon, pollster, pub_date, party, share, rank, win_prob in con.execute(
+    for pcon, pollster, pub_date, party, share, rank, win_prob, source_url in con.execute(
         """SELECT r.pcon_code, rel.pollster, rel.publish_date, r.party,
-                  r.vote_share_pct, r.rank, r.win_probability_pct
+                  r.vote_share_pct, r.rank, r.win_probability_pct, rel.source_url
            FROM mrp_constituency_results r
            JOIN mrp_releases rel ON rel.release_id = r.release_id
            ORDER BY r.pcon_code, rel.publish_date, r.rank"""
     ):
-        by_pcon[pcon].append([pollster, pub_date, party, share, rank, win_prob])
+        by_pcon[pcon].append([pollster, pub_date, party, share, rank, win_prob, source_url])
     return by_pcon
 
 
@@ -73,11 +73,12 @@ def fetch_local_council(con):
     distortion) and AVGs across wards within a council-block — NOT SUM,
     which would overcount (see docs/data_notes.md, the 2026-09-22 fix)."""
     by_pcon = defaultdict(list)
-    for pcon, la_name, date, party, share, n_wards in con.execute(
+    for pcon, la_name, date, party, share, n_wards, source_url in con.execute(
         """
         SELECT w.pcon_code, w.la_name, le.election_date, v.party,
                AVG(v.avg_vote_share_pct * COALESCE(o.weight, 1.0)) AS share,
-               COUNT(DISTINCT v.ward_code) AS n_wards
+               COUNT(DISTINCT v.ward_code) AS n_wards,
+               MAX(le.source_url) AS source_url
         FROM local_election_ward_party_avg v
         JOIN local_election_events le ON le.election_id = v.election_id
         -- ward_code only, not boundary_year — see docs/data_notes.md 2026-09-22
@@ -88,7 +89,7 @@ def fetch_local_council(con):
         ORDER BY w.pcon_code, w.la_name, le.election_date DESC
         """
     ):
-        by_pcon[pcon].append([la_name, date, party, round(share, 2) if share is not None else None, n_wards])
+        by_pcon[pcon].append([la_name, date, party, round(share, 2) if share is not None else None, n_wards, source_url])
     return by_pcon
 
 
@@ -141,8 +142,8 @@ def main():
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "columns": {
                 "ge2024": ["party", "vote_share_pct", "rank"],
-                "mrp": ["pollster", "publish_date", "party", "vote_share_pct", "rank", "win_probability_pct"],
-                "local_council": ["la_name", "election_date", "party", "avg_vote_share_pct", "n_wards"],
+                "mrp": ["pollster", "publish_date", "party", "vote_share_pct", "rank", "win_probability_pct", "source_url"],
+                "local_council": ["la_name", "election_date", "party", "avg_vote_share_pct", "n_wards", "source_url"],
                 "local_wards": ["la_name", "ward_name", "ward_code", "election_date", "party",
                                  "candidate_name", "votes", "vote_share_pct", "elected"],
             },
