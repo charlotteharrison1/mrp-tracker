@@ -46,12 +46,17 @@ BOUNDARY_YEAR = 2024
 WARD_MATCH_THRESHOLD = 85
 
 PARTY_MAP = {
-    "conservative": "C", "labour": "Lab", "labour co-op": "Lab", "labour and co-operative": "Lab",
-    "liberal democrats": "LD", "green": "Grn", "green party": "Grn",
+    # Canonical codes match docs/party_codes.md — chosen per-party for
+    # whichever existing form (LEAP's or the official GE2024 one) reads
+    # more clearly out of context, not a blanket "always use X's style"
+    # rule, since index.html displays these codes as literal text.
+    "conservative": "Con", "labour": "Lab", "labour co-op": "Lab", "labour and co-operative": "Lab",
+    "liberal democrats": "LD", "green": "Green", "green party": "Green",
     "reform": "RUK", "reform uk": "RUK", "independent": "Ind", "independents": "Ind",
     "workers party": "Workers", "workers party of britain": "Workers",
     "scottish national party": "SNP", "snp": "SNP", "plaid cymru": "PC",
     "trade unionist and socialist coalition": "TUSC", "tusc": "TUSC", "ukip": "UKIP",
+    "heritage party": "Heritage", "yorkshire party": "Yorks",
 }
 
 
@@ -138,6 +143,22 @@ def parse_ward_tables(html):
             continue  # can't get a usable row without these — skip this table
         seen_tables.add(id(table))
         ward_name = heading.get_text(strip=True)
+        # Casual-vacancy by-elections held later in the year sometimes get
+        # their own <h3> on the SAME page, with the SAME visible heading
+        # text as the main election's ward (Wikipedia disambiguates the
+        # HEADING ID, e.g. "Camp_Hill_2", but .get_text() on the heading
+        # doesn't show that) — so this can't be caught by the ward-code
+        # collision check below (which only catches two DIFFERENT names
+        # claiming one code; identical names aren't "different"). The
+        # table's own <caption> reliably says "<ward> by-election: <date>"
+        # for these — skip them entirely rather than merge a July by-
+        # election's votes into a May scheduled election's results (found
+        # 2026-09-22 auditing elected-count-vs-seats_available; see
+        # docs/data_notes.md).
+        caption = table.find("caption")
+        caption_text = caption.get_text(strip=True) if caption else ""
+        if "by-election" in caption_text.lower() or "by-election" in heading.get("id", "").lower():
+            continue
         rows = []
         for tr in table.find_all("tr"):
             cells = tr.find_all(["th", "td"])

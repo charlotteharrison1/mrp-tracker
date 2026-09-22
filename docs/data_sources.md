@@ -24,24 +24,51 @@ just the index.
 | 2026-09-22 | — | 2026 local election results for 111 councils LEAP hadn't transcribed yet (128 of 136 councils now covered in total, vs. 20 at the start of this session) | Wikipedia's per-council "2026 X Council election" articles — [master index](https://en.wikipedia.org/wiki/2026_United_Kingdom_local_elections) | `09_fetch_wikipedia_council_index.py` then `10_fetch_wikipedia_local_results.py` (MediaWiki API, not raw page scraping — see docs/data_notes.md) | Ward tables detected structurally (Party+Candidate header columns), not by heading text, which varies a lot across councils | 111 councils, ~21,900 ward-level candidate rows, 93.5% matched to a real ward_code | `local_election_events`, `local_election_ward_results`, `local_election_council_summary` |
 | 2026-09-22 | — | Backfilled real ONS `la_code`s onto all pre-existing LEAP-sourced events (was the placeholder `LEAP-<id>`) — a Phase 2 leftover from the original README, resolved while reconciling the Wikipedia and LEAP sources against each other | This repo's own DB (`wards.la_name` from Phase 1) | one-off fix, not a script — see docs/data_notes.md for the exact matching + collision-safety logic | 248 of 269 distinct LEAP council names matched and updated, across all years 2021-2026; 21 genuinely unmatchable county-level names left as placeholder | `local_election_events` |
 
-## Columns not yet sourced (tracked here so gaps are visible)
+## Remaining known gaps (updated 2026-09-22 during a full accuracy audit —
+## this section had gone stale after Phases 3/4 were actually completed;
+## the entries below are current, not aspirational)
 
-- `constituencies.mp_2024`, `party_2024`, `majority_2024`, `electorate_2024`,
-  `turnout_2024_pct`, `is_speaker_seat` — need Phase 3 (Electoral Commission
-  GE2024 results).
-- `ge2024_results` — empty, needs Phase 3.
-- `local_election_events.la_code` — currently a placeholder (`LEAP-<id>`),
-  not a real ONS LAD code. Per README Phase 2, needs backfilling by
-  fuzzy-matching `la_name` against `wards.la_name` from Phase 1.
-- `local_election_events.election_type` — all rows currently `'unknown'`;
-  LEAP's CSV doesn't say all-out/thirds/halves, only the results *page*
-  text does (per README Phase 2).
-- ~6% of `local_election_ward_results` rows have no `ward_code` (LEAP
-  didn't supply/match one) — untraceable to a constituency until
-  name-matched or transcribed.
+**Done, despite what an older version of this section said**:
+`ge2024_results` and `constituencies.mp_2024`/`party_2024`/`majority_2024`/
+`electorate_2024`/`turnout_2024_pct`/`is_speaker_seat` (Phase 3, all 650
+constituencies); `mrp_releases`/`mrp_constituency_results` (Phase 4, 15
+releases); `local_election_events.la_code` (backfilled from LEAP's
+placeholder `LEAP-<id>` to real ONS codes for 248 of 269 councils — 21
+remain on the placeholder, all genuinely unmatchable two-tier English
+county councils not present in `wards.la_name`, which only has districts).
+
+**Still genuinely open:**
+- `local_election_events.election_type` — 656 of 670 events (97.9%) are
+  still `'unknown'`. LEAP's CSV doesn't say all-out/thirds/halves, only
+  the results *page* text does; Wikipedia-sourced events do detect this
+  (`detect_election_type()` in `10_fetch_wikipedia_local_results.py`), so
+  the gap is entirely on the LEAP side. Cosmetic — nothing currently
+  reads this field for a calculation — but worth knowing before relying
+  on it for anything.
+- 6.3% of `local_election_ward_results` rows (5,444 of 86,593) have no
+  `ward_code` (source didn't supply one, or it didn't match a known
+  ward) — untraceable to a constituency until name-matched or
+  transcribed by hand.
 - `senedd_2021_constituencies`, `senedd_2021_results`,
-  `senedd2021_to_pcon24_crosswalk` — empty, needs Phase 5.
-- `ward_constituency_overlap` — empty; ~400 split wards from the Phase 1
-  load need this (see `docs/data_notes.md`, 2026-09-22 entry).
-- `mrp_releases`, `mrp_constituency_results` — empty, needs Phase 4
-  (tracked release-by-release in `docs/mrp_sources.md`).
+  `senedd2021_to_pcon24_crosswalk` — empty. Phase 5 was scoped and
+  documented (`docs/senedd_crosswalk.md`) but never actually built; only
+  discussed with the user, not executed. Nothing in `index.html`
+  currently references these tables, so their absence isn't visibly
+  broken anywhere — it's a missing feature, not a bug.
+- `ward_constituency_overlap` — empty. Confirmed via a live query against
+  the source ArcGIS layer (2026-09-22): 390 of 8,396 wards (4.6%) carry
+  ONS's own `SPLIT_WARD` flag, meaning they're genuinely split across 2
+  (occasionally 3) constituencies, but `01_fetch_ons_lookup.py` assigns
+  each to only ONE constituency (last-write-wins during load) since the
+  `wards` table's primary key is `(ward_code, boundary_year)` — one row
+  per ward, full stop, not one row per (ward, constituency) pair. A real
+  fix needs a schema change (dropping that assumption everywhere it's
+  joined on) plus the population-weighted geometric overlay described in
+  `docs/senedd_crosswalk.md`, applied here instead of to the Senedd
+  problem — deferred as out of scope for a data-accuracy pass, not
+  attempted. Practical effect: a constituency containing one of these 390
+  wards may be silently missing that ward's local election results
+  entirely (if the *other* constituency won the last-write-wins
+  assignment), or crediting itself with results that only partly belong
+  to it. Surfaced to site visitors in the Sources page note on the Phase
+  1 ward lookup entry, not just here.

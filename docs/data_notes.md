@@ -428,3 +428,105 @@ is for whichever session (or agent) picks this project up next.
   cause from "under 100%" (missing/excluded data) — don't assume every
   discrepancy in the same table comes from the same bug just because
   it's the same symptom category.
+- **2026-09-22 — full pre-deployment accuracy audit, requested explicitly
+  ("go through each dataset carefully and make sure everything is
+  accurate"), found five more issues across party codes, MRP, and one
+  more local-election bug the previous pass's checks didn't happen to
+  surface:**
+  1. **Party codes fragmented the same real party into two legend
+     entries/chart lines** (`C`/`Con`, `Grn`/`Green`, `WPB`/`Workers`,
+     `HPUK`/`Heritage`, `Yrks`/`Yorks` — Conservative, Green, Workers
+     Party, Heritage Party, Yorkshire Party) wherever local-election data
+     and GE2024/MRP data appeared on the same chart, e.g. the toggled-on
+     local-results overlay on the MRP chart. This was a KNOWN, already-
+     documented gap (`docs/party_codes.md`, written earlier but never
+     acted on) that only became visibly reachable once the local-results
+     chart overlay (added this session) put both sources' party rows in
+     the same legend. Fixed: canonical code chosen per-party for
+     readability (not "always LEAP" as the old doc's draft plan said —
+     see `docs/party_codes.md` for why that changed), migrated on the DB
+     directly, and `PARTY_MAP` dicts added to `03_fetch_leap_results.py`
+     (didn't normalise party AT ALL before this — took LEAP's raw CSV
+     column verbatim), `08_ingest_ge2024_results.py`, and
+     `10_fetch_wikipedia_local_results.py` (already had a `PARTY_MAP`,
+     just mapped these five to the wrong canonical form) so future
+     re-runs don't need another migration.
+  2. **5 Scottish seats in the More in Common Apr-2025 MRP release had
+     pre-final Boundary Commission codes**, not the ones in
+     `constituencies` — a foreign-key violation that SQLite silently
+     allowed (no `PRAGMA foreign_keys=ON` anywhere in this project).
+     `prep_ipsos_xlsx.py`/`prep_yougov_xlsx.py` already knew about this
+     exact 5-seat issue and defensively blank the code for the fuzzy
+     matcher to resolve; `prep_more_in_common_xlsx.py` trusted its
+     source's own code column blindly and never got the same treatment.
+     Fixed by name-matching the 5 seats against the source xlsx directly
+     (`Ayr, Carrick and Cumnock`, `Berwickshire, Roxburgh and Selkirk`,
+     `Central Ayrshire`, `Kilmarnock and Loudoun`, `West Aberdeenshire and
+     Kincardine`) and correcting the 35 affected rows in place, then
+     adding the same known-codes validation to
+     `prep_more_in_common_xlsx.py` for future releases.
+  3. **An orphaned, empty duplicate MRP release** (`release_id=12`: same
+     pollster/dates as `release_id=11`, zero constituency rows) sat in
+     `mrp_releases`, left over from a re-run after fixing the Mac Roman
+     encoding bug (see the 2026-09-22 entry above). Root cause:
+     `mrp_releases` has `UNIQUE(pollster, publish_date, client)`, but
+     `client` is NULL for the large majority of releases (no
+     commissioning body), and SQLite treats every NULL as distinct from
+     every other NULL for UNIQUE-constraint purposes — so `ON
+     CONFLICT(pollster, publish_date, client)` in
+     `04_ingest_mrp_release.py` silently never fires for a NULL-client
+     release, and re-running the script for one always inserted a new,
+     duplicate `mrp_releases` row instead of updating the existing one.
+     Deleted the empty duplicate and fixed `04_ingest_mrp_release.py` to
+     coerce `client` to `""` instead of `None`, which makes the UNIQUE
+     constraint actually work (verified: a duplicate insert now correctly
+     raises `IntegrityError`). Also normalised all existing NULL `client`
+     values to `""` for consistency.
+  4. **Best for Britain's release (`release_id=16`) has every single seat
+     summing to ~70-90%, not ~100%** — already known and deliberately
+     accepted (`prep_bestforbritain_pdf.py`'s own validation range is
+     [70,100] specifically because of this), NOT a new bug: this
+     pollster's own published tables list only the parties it explicitly
+     modelled per seat, with no "Other"/residual catch-all column, unlike
+     every other release loaded here. Added an explicit note to this
+     effect in the release's own `methodology_notes` (previously only
+     explained in code comments, not visible to a site visitor looking at
+     the Sources page) so nobody mistakes the low sum for a loading bug.
+  5. **Same-day-ish casual-vacancy by-elections got merged into the main
+     scheduled election's results** for 4 wards across 3 Wikipedia-
+     sourced councils (Lambeth's Clapham Park and Streatham St Leonard's,
+     Rochford's Sweyne Park & Grange, Nuneaton and Bedworth's Camp Hill) —
+     found via a `SUM(elected) != seats_available` sanity check (7
+     wards flagged; 4 were this bug, 3 were already-correctly-excluded
+     by-election tables from the collision fix above). Wikipedia gives a
+     by-election its own `<h3>` with the SAME VISIBLE TEXT as the ward's
+     main-election heading (disambiguated only in the HTML `id`
+     attribute, e.g. `id="Camp_Hill_2"`, which `.get_text()` doesn't
+     show), so it was invisible to the ward-CODE collision check (which
+     only catches two DIFFERENT names claiming one code — identical names
+     aren't "different"). Confirmed by re-fetching the live pages and
+     diffing candidate lists: each by-election table's `<caption>`
+     explicitly says e.g. "Camp Hill by-election: 25 June 2026" — a
+     genuinely separate, later contest, not a data error to reconcile.
+     Deleted the 21 misattributed by-election candidate rows from the 4
+     wards and recomputed `vote_share_pct`/`seats_available` for the
+     remaining genuine main-election rows. Fixed
+     `10_fetch_wikipedia_local_results.py` to skip any table whose
+     caption or heading id says "by-election" at parse time, which
+     **also revealed the collision fix from the entry above had been
+     more destructive than necessary**: for the 2 cases where the
+     by-election had a genuinely DIFFERENT heading text ("Town" vs "Town
+     by-election", "Cranbrook, Sissinghurst & Frittenden" vs "...by-
+     election"), nulling BOTH names' ward_code (the only safe option
+     available at the time) threw away perfectly good main-election data
+     along with the by-election contamination. Restored both wards'
+     correct `ward_code` via exact name match once the real fix (skip
+     by-election tables at parse time, don't just react to the collision
+     they cause) made clear which one was safe to keep.
+  **Lesson for next time**: a "reject the ambiguous case" safety net is
+  only as good as what it's watching for — this collision detector
+  watched ward_CODEs, not ward NAMES, so two tables sharing an identical
+  name (not just an identical code) slipped past it entirely; and once a
+  more specific, correct signal was found (the by-election caption text),
+  it was worth going back and checking whether the earlier, blunter fix
+  had thrown away anything it didn't need to.

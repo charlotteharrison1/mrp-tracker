@@ -18,12 +18,14 @@ Loads:
     electorate_2024, turnout_2024_pct, is_speaker_seat (Chorley) from the
     winning candidate's row.
 
-Party codes come from the CSV's "Main party abbreviation" field as-is
-(e.g. Con, Lab, RUK) — see docs/party_codes.md for known mismatches against
-LEAP's local-election codes (Grn vs Green, C vs Con, Workers vs WPB).
-Independents have a blank abbreviation in the source data; normalised to
-"Ind" here to match the convention already used throughout local election
-data.
+Party codes come from the CSV's "Main party abbreviation" field, with a
+handful remapped to the canonical form in docs/party_codes.md (picked
+per-party for readability, not "always LEAP" or "always official" — e.g.
+Workers Party of Britain is "Workers" here despite the CSV saying "WPB",
+matching local election data's larger existing usage; Conservative stays
+"Con" since that's clearer than local's bare "C"). Independents have a
+blank abbreviation in the source data; normalised to "Ind" here to match
+the convention already used throughout local election data.
 
 Usage:
     python scripts/08_ingest_ge2024_results.py
@@ -45,10 +47,13 @@ def fetch_csv():
     return list(csv.DictReader(text.splitlines()))
 
 
+PARTY_MAP = {"WPB": "Workers", "HPUK": "Heritage", "Yrks": "Yorks"}
+
+
 def normalise_party(row):
     abbrev = row["Main party abbreviation"].strip()
     if abbrev:
-        return abbrev
+        return PARTY_MAP.get(abbrev, abbrev)
     if row["Candidate is standing as Commons Speaker"] == "true":
         return "Speaker"  # Hoyle (Chorley) stands with no party label, not as an independent
     if row["Candidate is standing as independent"] == "true":

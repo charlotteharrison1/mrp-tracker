@@ -85,6 +85,17 @@ def main():
     parser.add_argument("--sample-size", type=int)
     parser.add_argument("--methodology-notes")
     args = parser.parse_args()
+    # SQLite treats every NULL as distinct from every other NULL for
+    # UNIQUE(pollster, publish_date, client) purposes, so a NULL client
+    # (the common case - most releases have no commissioning client) never
+    # actually conflicts with itself: ON CONFLICT silently never fires, and
+    # re-running this script for the same release inserts a second, empty
+    # mrp_releases row instead of updating the first (found 2026-09-22
+    # auditing the DB - release_id 12 was exactly this: an orphaned
+    # zero-row duplicate of release_id 11 from a re-run after fixing the
+    # Mac Roman encoding bug). Coercing to "" makes the UNIQUE constraint
+    # actually unique.
+    args.client = args.client or ""
 
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()

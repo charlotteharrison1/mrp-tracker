@@ -42,6 +42,13 @@ DB_PATH = ROOT / "data" / "uk_elections.db"
 INDEX_CSV = ROOT / "data" / "leap_council_index.csv"
 # The site's proxy 502s requests carrying the default python-requests UA.
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; uk-elections-tracker/1.0)"}
+# LEAP's own party codes for a few parties differ from the official
+# GE2024/MRP codes for the same party — without this, the same real party
+# silently splits into two legend entries/lines wherever both sources
+# appear on one chart. See docs/party_codes.md for the full reasoning
+# (canonical form picked per-party for readability, not "always LEAP" or
+# "always official").
+PARTY_MAP = {"C": "Con", "Grn": "Green", "Yorkshire": "Yorks"}
 
 
 def fetch_and_load_one(con, council_id, year, la_code, la_name, boundary_year, csv_url=None, page_url=None):
@@ -86,7 +93,8 @@ def fetch_and_load_one(con, council_id, year, la_code, la_name, boundary_year, c
         votes = int(votes) if votes.strip().isdigit() else None
         elected = 1 if status.strip().lower() == "elected" else 0
         ward_code = ward_code.strip() or None
-        parsed_rows.append((ward_name.strip(), ward_code, candidate.strip(), party.strip(), votes, elected))
+        party = PARTY_MAP.get(party.strip(), party.strip())
+        parsed_rows.append((ward_name.strip(), ward_code, candidate.strip(), party, votes, elected))
         if votes:
             ward_totals[ward_name.strip()] += votes
 

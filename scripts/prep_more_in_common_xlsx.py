@@ -20,8 +20,12 @@ Usage:
 import argparse
 import csv
 import re
+import sqlite3
 import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = ROOT / "data" / "uk_elections.db"
 
 PARTY_MAP = {
     "conservative": "Con", "labour": "Lab", "liberal democrat": "LD",
@@ -97,7 +101,21 @@ def main():
     seat_col = norm_header.index("constituency")
     code_col = next((i for i, k in enumerate(norm_header) if k in CODE_COL_KEYS), None)
     if code_col is not None:
-        print("  Found an explicit constituency-code column — skipping fuzzy name matching for this release.")
+        print("  Found an explicit constituency-code column.")
+    # Even when the source has its own code column, don't trust it blindly:
+    # the April 2025 release's codes for 5 Scottish seats (Ayr Carrick and
+    # Cumnock, Berwickshire Roxburgh and Selkirk, Central Ayrshire,
+    # Kilmarnock and Loudoun, West Aberdeenshire and Kincardine) turned out
+    # to be pre-final ONS numbering, not the ones in our `constituencies`
+    # table — same known issue as prep_ipsos_xlsx.py/prep_yougov_xlsx.py,
+    # just missed here originally (found 2026-09-22 auditing the DB for
+    # orphan pcon_codes). Validate against the DB and fall back to blank
+    # pcon_code (name-only) for 04_ingest_mrp_release.py's own fuzzy
+    # matcher, which will be an exact string match for cases like this.
+    con = sqlite3.connect(DB_PATH)
+    known_codes = set(r[0] for r in con.execute("SELECT pcon_code FROM constituencies"))
+    con.close()
+    n_code_mismatch = 0
 
     party_cols = {}  # our_code -> column index
     unrecognised = []
@@ -119,6 +137,9 @@ def main():
             continue
         seat_name = row[seat_col]
         pcon_code = row[code_col].strip() if code_col is not None and row[code_col] else ""
+        if pcon_code and pcon_code not in known_codes:
+            n_code_mismatch += 1
+            pcon_code = ""
         n_seats += 1
         for our_party, i in party_cols.items():
             share = parse_share(row[i]) if i < len(row) else None
@@ -134,6 +155,8 @@ def main():
         writer.writerows(out_rows)
 
     print(f"Wrote {len(out_rows)} party rows across {n_seats} seats to {out_path}")
+    if n_code_mismatch:
+        print(f"  ({n_code_mismatch} seats had a pcon_code not in our DB, falling back to name matching)")
 
 
 if __name__ == "__main__":

@@ -150,7 +150,14 @@ STATIC_SOURCES = [
         "source_name": "ONS Open Geography Portal (ArcGIS FeatureServer)",
         "source_url": "https://geoportal.statistics.gov.uk/datasets/ons::ward-to-westminster-parliamentary-constituency-to-lad-to-utla-july-2024-lookup-in-uk/about",
         "script": "01_fetch_ons_lookup.py",
-        "note": "650 constituencies, 8,396 wards.",
+        "note": "650 constituencies, 8,396 wards. Known limitation: 390 wards nationally "
+                "(4.6%) are flagged by ONS as split across 2+ constituencies; this project "
+                "assigns each to a single constituency rather than proportionally splitting "
+                "it, so a constituency containing one of these wards may be missing that "
+                "ward's local election results entirely, or crediting itself with results "
+                "that partly belong to a neighbouring seat. A proper fix needs population-"
+                "weighted boundary geometry (see docs/senedd_crosswalk.md for the same "
+                "technique applied to a different problem), not attempted here.",
     },
     {
         "phase": 1, "dataset": "LEAP council/year index",
