@@ -1,0 +1,147 @@
+# UK MRP & Local Elections Tracker
+
+A local SQLite database + Python scripts for tracking, since the 2024 general
+election: every publicly available MRP projection, local election results
+(ward-level, 2021+), the 2021 Senedd results mapped onto 2024 Westminster
+boundaries, and comparisons between projections and actual results —
+per constituency, using ONS codes as the join key throughout.
+
+**Built for Claude Code.** This repo is meant to be opened in Claude Code and
+run/extended there, because most of the data collection needs full web
+access and repeated runs over time as new MRPs and local elections land —
+things this chat's own sandbox can't do. Below is the build plan; hand each
+phase to Claude Code as a task.
+
+## Quick start
+
+```bash
+pip install -r requirements.txt
+python scripts/00_setup_db.py
+python scripts/01_fetch_ons_lookup.py --base-url "<ArcGIS FeatureServer URL>" --suffix 19 --boundary-year 2019
+python scripts/02_fetch_leap_council_index.py
+python scripts/03_fetch_leap_results.py --from-index --years 2021 2022 2023 2024 2025
+```
+
+That gets you: the constituency/ward reference tables, and every LEAP-hosted
+local election result from 2021 onward, loaded and ready to query. MRP data,
+the Senedd crosswalk, and the GE2024 baseline need the phases below.
+
+## Architecture
+
+```
+schema.sql                     SQLite schema — the source of truth for every table
+scripts/
+  00_setup_db.py                creates data/uk_elections.db from schema.sql
+  01_fetch_ons_lookup.py        ward <-> constituency reference data (ONS)
+  02_fetch_leap_council_index.py   council name/id/year index (LEAP)
+  03_fetch_leap_results.py      downloads + loads ward-level local election results (LEAP)
+  04_ingest_mrp_release.py      loads one standardised MRP release CSV
+  05_compare_mrp_vs_actuals.py  exports the MRP-vs-actual comparison table
+  06_constituency_dashboard.py  generates a static HTML profile per constituency
+templates/
+  mrp_release_template.csv      the CSV shape 04_ingest_mrp_release.py expects
+data/                           gitignore this — it's all generated/downloaded
+docs/                           notes referenced from the scripts (below)
+```
+
+## Why some things are automated and some aren't
+
+Two data sources are genuinely, reliably scriptable, and the scripts above
+do it end to end:
+- **Ward/constituency reference data** — ONS publishes this as a clean,
+  queryable API (ArcGIS FeatureServer).
+- **Local election results** — Andrew Teale's Local Elections Archive
+  Project (LEAP) publishes a direct CSV export per council per year, and an
+  index page listing every council's LEAP id and every year it has data
+  for. This is the best possible source for this project: comprehensive
+  (decades back), consistent format, no rate-limiting concerns for
+  reasonable use.
+
+**MRP data is not reliably scriptable**, and I want to be upfront about why
+rather than hand you a scraper that quietly produces garbage: every
+pollster publishes their MRP results in a different shape — an interactive
+dashboard (JS-rendered, no stable API), a downloadable spreadsheet, or just
+numbers embedded in a blog post/PDF. There's no common structure to write
+one scraper against. The realistic workflow (`04_ingest_mrp_release.py`) is:
+1. Find the release (see `docs/mrp_sources.md`).
+2. Get its per-constituency numbers into the template CSV shape — this is
+   exactly the kind of "read this page/PDF and produce structured data"
+   task Claude Code is good at doing per-release, even though a single
+   generic scraper can't cover all of them.
+3. Run the ingest script with that CSV.
+
+This means building out full 2024-to-now MRP coverage is genuinely a series
+of individual tasks (one per release), not a single script run. Budget for
+that — it's maybe 15-25 releases to backfill, based on what's been published
+across Electoral Calculus/PLMR, More in Common, YouGov, Focaldata, Ipsos,
+and Survation since July 2024.
+
+## Build plan (phases to run in Claude Code)
+
+**Phase 1 — reference data.** Run `00`–`02` above. For `01`, get the current
+ArcGIS FeatureServer URL from https://geoportal.statistics.gov.uk/ (search
+"Ward to Westminster Parliamentary Constituency lookup") — the exact service
+ID changes with each ONS vintage, so it has to be fetched fresh rather than
+hardcoded. Run it once per boundary vintage you want (at minimum, one for
+current 2024-era boundaries).
+
+**Phase 2 — local elections backfill.** Run `03 --from-index --years 2021
+2022 2023 2024 2025 2026`. Then handle the leftovers:
+- Rows in `leap_council_index.csv` with `is_leap_hosted=False` point to a
+  council's own results page instead — write a small per-site parser as
+  needed, or transcribe manually for the handful of cases.
+- `la_code` for LEAP-loaded rows is currently a placeholder (`LEAP-<id>`)
+  since LEAP's index doesn't give ONS LAD codes directly. Join
+  `local_election_events.la_name` against the `wards.la_name` values loaded
+  in Phase 1 to backfill real ONS `la_code`s (fuzzy-match on name; most will
+  match exactly).
+- `election_type` ('all-out' vs 'thirds' vs 'halves') isn't in the LEAP CSV.
+  The results *page* (not the CSV) says this in the text near the top (e.g.
+  "Whole council up for election on new ward boundaries"), so a light HTML
+  scrape of that one line, per council/year, fills this in — worth doing
+  since your requirements specifically call out all-out elections.
+
+**Phase 3 — GE2024 baseline.** Populate `ge2024_results` from the Electoral
+Commission's official results file (published as a downloadable Excel/CSV
+per constituency — search "Electoral Commission 2024 general election
+results data"). This is what every MRP and local-election comparison in
+`05_compare_mrp_vs_actuals.py` measures against.
+
+**Phase 4 — MRP backfill.** Work through `docs/mrp_sources.md` release by
+release with `04_ingest_mrp_release.py`. Start with the most recent 3-4
+releases (highest value, freshest data) then work backward to July 2024.
+
+**Phase 5 — Senedd 2021 crosswalk.** This is the hardest piece and needs a
+geometric approach, not a lookup table — see `docs/senedd_crosswalk.md`.
+
+**Phase 6 — dashboards.** `06_constituency_dashboard.py --all` once Phases
+1-4 have real data in them. Treat the current version as a first draft —
+it's plain HTML with no JS framework specifically so it's easy for Claude
+Code to extend (add a constituency picker/index page, swap in a proper
+charting library, etc.) rather than something to just re-run as-is forever.
+
+## Key caveats (worth remembering, not just documenting)
+
+- **Chorley.** The Speaker's seat is conventionally excluded from swing/MRP
+  modelling since the Speaker stands unopposed by convention. If a release
+  is missing Chorley, that's why — not a data error.
+- **Join everything on `pcon_code`, never on constituency name.** Names get
+  reordered, abbreviated, and spelled differently across sources. This is
+  the entire reason this schema exists.
+- **Ward boundaries change.** `wards` is versioned by `boundary_year`
+  specifically so a ward result from 2019 and one from 2023 aren't silently
+  conflated when the geography actually changed underneath them.
+- **MRPs vary a lot in quality**, especially at sub-national/list level —
+  worth keeping `mrp_releases.methodology_notes` populated with anything
+  notable (small sample, known errors, etc.) rather than treating every
+  release as equally reliable.
+
+## docs/ (create these as you go)
+
+- `docs/mrp_sources.md` — running list of MRP releases found, with status
+  (not started / CSV built / ingested), one line per release.
+- `docs/senedd_crosswalk.md` — methodology notes for Phase 5.
+- `docs/data_notes.md` — anything you discover along the way that the next
+  session (or a different agent picking this up) needs to know — treat this
+  like a lab notebook, not a polished doc.
+# mrp-tracker
