@@ -173,8 +173,12 @@
   .chart-wrap { position: relative; padding: 0.8rem 0.8rem 0; background: var(--surface-raised); }
   .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
   .chart-line { fill: none; stroke-width: 2; }
-  .chart-actual-line { stroke-width: 1.5; stroke-dasharray: 1 3; stroke-linecap: round; opacity: 0.45; }
   .chart-dot { stroke-width: 1.5; stroke: var(--surface-raised); }
+  .chart-actual-marker { stroke-width: 1.5; stroke: var(--surface-raised); cursor: pointer; }
+  .chart-actual-marker:hover, .chart-actual-marker.active { stroke: var(--text-primary); }
+  .chart-actual-line { stroke-width: 1.5; stroke-dasharray: 1 3; stroke-linecap: round; opacity: 0.45; pointer-events: none; }
+  .chart-election-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .chart-election-label { fill: var(--text-muted); font-size: 9px; }
   .chart-axis { stroke: var(--border); stroke-width: 1; }
   .chart-axis-label { fill: var(--text-muted); font-size: 9px; }
   .chart-crosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 2; pointer-events: none; }
@@ -451,8 +455,8 @@
       return body;
     }
     body += '<div class="marker-legend">' +
-      '<span class="mk"><svg width="16" height="10"><line x1="0" y1="5" x2="16" y2="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="1 3" stroke-linecap="round" opacity="0.6"></line><rect x="4" y="1" width="8" height="8" fill="currentColor"></rect></svg> Actual result (GE2024) — faint line shown across the whole chart for comparison</span>' +
-      '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection (solid = modelled, not measured)</span>' +
+      '<span class="mk"><svg width="10" height="10"><path d="M5,0 L10,5 L5,10 L0,5 Z" fill="currentColor"></path></svg> Actual result (GE2024) — click a diamond to compare it across the whole chart</span>' +
+      '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection (modelled, not measured)</span>' +
       "</div>";
     body += '<div class="chart-wrap" id="mrp-chart"></div>';
     if (!rows.length) {
@@ -870,23 +874,22 @@
       return { x: xOf(t), label: new Date(t).toISOString().slice(0, 10) };
     }), H - 4, MT + plotH, MT + plotH + 3);
 
+    // A single vertical guide line at the election date, so "when" is
+    // unambiguous regardless of how many parties/points are on screen.
+    var actualTimes = points.filter(function (p) { return p.kind === "actual"; }).map(function (p) { return p.t; });
+    if (actualTimes.length) {
+      var geX = xOf(actualTimes[0]);
+      svg.appendChild(svgEl("line", {
+        class: "chart-election-line", x1: geX, x2: geX, y1: MT, y2: MT + plotH,
+      }));
+      var geLabel = svgEl("text", { class: "chart-election-label", x: geX, y: MT - 2, "text-anchor": "middle" });
+      geLabel.textContent = "Election";
+      svg.appendChild(geLabel);
+    }
+
+    var actualLineByParty = {};
     parties.forEach(function (party) {
       var color = partyColour(party);
-
-      // Actual result: a faint dotted reference line spanning the full
-      // chart width, so every MRP point can be read directly against it —
-      // not just at the one date it was measured on.
-      points.filter(function (p) { return p.party === party && p.kind === "actual"; }).forEach(function (p) {
-        var y = yOf(p.share);
-        svg.appendChild(svgEl("line", {
-          class: "chart-actual-line", x1: ML, x2: W - MR, y1: y, y2: y, stroke: color,
-        }));
-        var s = 7;
-        svg.appendChild(svgEl("rect", {
-          x: xOf(p.t) - s / 2, y: y - s / 2, width: s, height: s,
-          fill: color, stroke: "var(--surface-raised)", "stroke-width": 1,
-        }));
-      });
 
       var projected = points.filter(function (p) { return p.party === party && p.kind === "projected"; })
         .sort(function (a, b) { return a.t - b.t; });
@@ -896,6 +899,32 @@
       }
       projected.forEach(function (p) {
         svg.appendChild(svgEl("circle", { class: "chart-dot", cx: xOf(p.t), cy: yOf(p.share), r: 3.5, fill: color }));
+      });
+
+      // Actual result: a clear, distinct diamond icon (not a circle, so it
+      // never gets lost among the MRP dots) right on the election guide
+      // line. Click it to toggle a faint reference line across the whole
+      // chart, for comparing every MRP point against this value directly.
+      points.filter(function (p) { return p.party === party && p.kind === "actual"; }).forEach(function (p) {
+        var x = xOf(p.t), y = yOf(p.share), s = 6;
+        var d = "M" + x + "," + (y - s) + " L" + (x + s) + "," + y + " L" + x + "," + (y + s) + " L" + (x - s) + "," + y + " Z";
+        var marker = svgEl("path", { class: "chart-actual-marker", d: d, fill: color });
+        marker.addEventListener("click", function () {
+          var existing = actualLineByParty[party];
+          if (existing) {
+            existing.remove();
+            delete actualLineByParty[party];
+            marker.classList.remove("active");
+          } else {
+            var line = svgEl("line", {
+              class: "chart-actual-line", x1: ML, x2: W - MR, y1: y, y2: y, stroke: color,
+            });
+            svg.appendChild(line);
+            actualLineByParty[party] = line;
+            marker.classList.add("active");
+          }
+        });
+        svg.appendChild(marker);
       });
     });
 
