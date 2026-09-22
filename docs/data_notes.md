@@ -186,6 +186,122 @@ is for whichever session (or agent) picks this project up next.
   silently keeping one. Final yield: 584 of 632 possible seats (92%)
   passed both the name-match and vote-share-sum validation; the rest are
   logged with the specific reason, not silently dropped.
+- **Filled the 2026 local elections gap with a new Wikipedia-based source**
+  (`scripts/09_fetch_wikipedia_council_index.py` + `10_fetch_wikipedia_local_results.py`).
+  136 English councils held elections on 7 May 2026; LEAP only had 20
+  transcribed as of this session. Wikipedia's per-council election
+  articles (filled in within days by the WikiProject UK elections
+  community) cover the rest, in a consistent wikitable format per ward.
+  Real findings along the way:
+  1. **Scraping raw Wikipedia page URLs directly (even just HEAD requests)
+     trips bot detection within 2-3 rapid requests** (403s start
+     immediately). The MediaWiki API (`action=query` for batched
+     existence checks up to 50 titles/call, `action=parse` for page
+     content) is the actual sanctioned bulk-access path and doesn't have
+     this problem, though it still needs pacing (429s hit at even a few
+     requests/second on `action=query` with `list=search`) — retry with
+     exponential backoff, ~1 req/sec.
+  2. **The council summary page's links don't point at the election
+     article** — they go to the council's own general page (e.g.
+     "Barnet_London_Borough_Council"), and the election article is
+     reliably at "2026_<that title>_election" for MOST councils, but not
+     all (e.g. "St_Helens_Council" -> the real article is
+     "2026_St_Helens_**Borough**_Council_election", with "Borough"
+     inserted) — handled with a search-API fallback for the ones that
+     fail direct construction.
+  3. **Ward-level table structure, confirmed consistent across single-
+     member (Oxford) and multi-member (Camden, 3-seat) wards**: under an
+     `<h2>Ward results</h2>` heading, each ward is an `<h3>` heading
+     immediately followed by a wikitable; real candidate rows have
+     exactly 6 cells (blank colour-swatch + party/candidate/votes/%/±%),
+     which is what distinguishes them from the header/Turnout/Majority/
+     hold-summary rows (all different cell counts). The winning
+     candidate(s) are wrapped in `<b>` — confirmed this correctly
+     identifies all N winners in an N-seat ward, not just one.
+  4. **Real, serious bug caught before it corrupted the DB**: 20 councils
+     already had 2026 data from LEAP. The Wikipedia scraper's constructed
+     `la_code` (a REAL ONS code) didn't match LEAP's placeholder
+     `LEAP-<id>` code for the same council/date, so it created a *second*,
+     duplicate election event instead of recognising the overlap — found
+     immediately (Camden) by comparing row counts against the existing
+     LEAP data, which also revealed the actual vote data matches exactly
+     between both independent sources (a good cross-validation, incidentally).
+     Fixed by backfilling LEAP's placeholder la_codes with real ONS codes
+     first (resolving the "LEAP-<id> placeholder" debt the README flagged
+     back in Phase 2 for the whole project, not just 2026 — 248 of 269
+     distinct LEAP council names matched with high confidence, applied
+     retroactively to all years 2021-2026), then having the Wikipedia
+     script skip any council already covered for 2026 once la_codes are
+     comparable. Also fixed LEAP's 2026 placeholder date ('2026-05-01')
+     to the real national polling day ('2026-05-07') for the 20 affected events.
+  5. **21 LEAP council names are genuinely unmatchable to a real la_code
+     and were deliberately left as placeholders**: county councils
+     (Essex, Kent, Hampshire, Surrey, Norfolk, etc.) — counties aren't in
+     `wards.la_name` at all (only their constituent districts are), so
+     there's no correct target to match to. The naive fuzzy matcher
+     initially matched several of these to a same-named DISTRICT within
+     the county (e.g. "Norfolk" -> "North Norfolk", "Gloucestershire" ->
+     "South Gloucestershire") — caught via a collision check (two
+     different county/district LEAP names both trying to claim the same
+     target la_code for the same date) before it was applied, not after.
+  6. **The heading text above each ward-results section isn't consistent
+     across councils** — 'Ward results' (Oxford, Camden), 'Results by
+     ward' (Islington, Bradford, Leeds), plain 'Results' (Hull — which
+     ALSO has an unrelated 'Results summary' heading, so a naive substring
+     match on "result" would grab the wrong section), or 'Candidates'
+     with no ward-related word at all (Cambridge). Chasing each variant by
+     name is a losing game. Fixed by detecting ward tables STRUCTURALLY
+     instead: scan every `<h3>`/`<h4>` in the whole document regardless of
+     its parent heading, and accept the table right after it if that
+     table's own header row contains both "Party" and "Candidate" — a
+     combination that doesn't occur on the Incumbents/Council-composition/
+     infobox tables elsewhere on the same pages, so it's self-validating
+     rather than a guess.
+  7. **The column SET isn't consistent either** — most councils' tables
+     have Party/Candidate/Votes/%/±% (a swing column), but Bradford's
+     omit ±% entirely (Party/Candidate/Votes/% only). A hardcoded "must
+     have exactly 6 cells" check silently discarded every row on any
+     table missing that column (zero rows extracted, indistinguishable
+     from "no ward table found" without checking further) even though the
+     table itself was completely fine. Fixed by mapping columns from the
+     header row's own text (index of "Party", "Candidate", "Votes", "%")
+     instead of assuming fixed positions, with a fixed +1 offset for the
+     leading blank colour-swatch cell that data rows have but the header
+     row doesn't.
+  8. **The most serious bug of the batch, and the one hardest to catch**:
+     script 09's la_code matching didn't exclude English county councils
+     the way the LEAP backfill (point 5, this file) already learned to.
+     "Hampshire" and "Norfolk" (counties) each matched a same-named
+     DISTRICT uniquely — "East Hampshire", "North Norfolk" — with no
+     COLLISION to trip the existing safety net, since collision-detection
+     only catches two different names competing for one target, not one
+     name confidently landing on the wrong unique target. Both got
+     scraped and loaded successfully under the wrong la_code/la_name
+     before this was noticed by manually cross-checking loaded councils
+     against known target names, at which point it was already sitting
+     in the database as if it were real district-level data. Deleted both
+     corrupted events and fixed by reusing the same county exclusion list
+     in `09_fetch_wikipedia_council_index.py` directly (not just the
+     LEAP backfill), so county names never get a la_code candidate in the
+     first place, structural match or not. **Lesson for next time: a
+     collision check only catches AMBIGUOUS wrong matches, never
+     CONFIDENT wrong ones — when a whole category of names (counties)
+     structurally can't have a correct target, exclude the category
+     explicitly rather than trusting the matcher's own confidence score.**
+
+  Final result after all of the above: **128 of 136 councils have 2026
+  local election data** (111 via Wikipedia, the rest already via LEAP,
+  now on real la_codes throughout — 131 total distinct la_codes with 2026
+  data once you count the 3 counties still correctly sitting on a
+  placeholder, see point 5); 93.5% of the ~21,900 new ward-level rows
+  matched a real ward_code. The remaining 8 councils are genuinely out of
+  scope for this schema, not a bug: 6 English county councils (Essex,
+  Hampshire, Norfolk, Suffolk, East Sussex, West Sussex — counties aren't
+  in `wards.la_name`) plus East Surrey and West Surrey, two brand-new
+  unitary authorities formed by Surrey's 2025 local government
+  reorganisation that don't exist yet in the July-2024-vintage ONS ward
+  lookup this project has loaded (Phase 1 would need a newer vintage to
+  cover them).
 - **LEAP CSV column order isn't stable across eras.** Modern exports
   (confirmed on Westminster 2022) are
   `council, ward, "", ward_code(GSS), candidate, party, votes, status` —
