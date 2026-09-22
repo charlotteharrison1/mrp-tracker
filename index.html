@@ -83,6 +83,8 @@
   .sources-page .card .note { margin-top: 0.4rem; }
   .marker-legend { display: flex; gap: 1.2rem; font-size: 0.78rem; color: var(--text-secondary); margin: 0.3rem 0 0.6rem; }
   .marker-legend .mk { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .local-toggle { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.4rem; cursor: pointer; font-weight: 500; }
+  .local-toggle input { cursor: pointer; }
   .layout {
     display: flex;
     flex: 1;
@@ -177,6 +179,10 @@
   .chart-actual-marker { stroke-width: 1.5; stroke: var(--surface-raised); cursor: pointer; }
   .chart-actual-marker:hover, .chart-actual-marker.active { stroke: var(--text-primary); }
   .chart-actual-line { stroke-width: 1.5; stroke-dasharray: 1 3; stroke-linecap: round; opacity: 0.45; pointer-events: none; }
+  .chart-local-line { fill: none; stroke-width: 1.3; opacity: 0.85; }
+  .chart-local-marker { fill: var(--surface-raised); stroke-width: 1.3; }
+  .chart-legend-councils { padding-top: 0; color: var(--text-secondary); }
+  .chart-legend-councils svg { vertical-align: middle; margin-right: 0.15rem; }
   .chart-election-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
   .chart-election-label { fill: var(--text-muted); font-size: 9px; }
   .chart-axis { stroke: var(--border); stroke-width: 1; }
@@ -406,7 +412,7 @@
       (c.speaker ? " · <strong>Speaker's seat</strong> (conventionally excluded from swing/MRP modelling)" : "") +
       "</p>";
 
-    html += renderMrp(d.ge2024, d.mrp);
+    html += renderMrp(d.ge2024, d.mrp, d.local_council);
     html += '<h2 class="group-heading">Actual election results</h2>';
     html += renderGe2024(d.ge2024);
     html += renderLocalByCouncil(d.local_council, d.local_wards);
@@ -415,7 +421,13 @@
     els.detail.scrollTop = 0;
     wireWardDetailToggles(d.local_wards);
     mountTrendCharts(d.local_council);
-    mountMrpChart(d.ge2024, d.mrp);
+    mountMrpChart(d.ge2024, d.mrp, d.local_council, false);
+    var localToggle = document.getElementById("toggle-local-results");
+    if (localToggle) {
+      localToggle.addEventListener("change", function () {
+        mountMrpChart(d.ge2024, d.mrp, d.local_council, localToggle.checked);
+      });
+    }
   }
 
   function renderGe2024(rows) {
@@ -448,7 +460,7 @@
       escapeHtml(label || "source") + " ↗</a>";
   }
 
-  function renderMrp(ge2024Rows, rows) {
+  function renderMrp(ge2024Rows, rows, localRows) {
     var body = "<section><h2>MRP projections vs. actual, over time</h2>";
     if (!rows.length && !(ge2024Rows && ge2024Rows.length)) {
       body += '<p class="placeholder">No MRP releases loaded yet for this seat (Phase 4).</p></section>';
@@ -456,8 +468,12 @@
     }
     body += '<div class="marker-legend">' +
       '<span class="mk"><svg width="10" height="10"><path d="M5,0 L10,5 L5,10 L0,5 Z" fill="currentColor"></path></svg> Actual result (GE2024) — click a diamond to compare it across the whole chart</span>' +
-      '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection</span>' +
-      "</div>";
+      '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection</span>';
+    if (localRows && localRows.length) {
+      body += '<span class="mk"><svg width="10" height="10"><path d="M5,1 L9,9 L1,9 Z" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg> Local council results' +
+        '<label class="local-toggle"><input type="checkbox" id="toggle-local-results"> show on chart</label></span>';
+    }
+    body += "</div>";
     body += '<div class="chart-wrap" id="mrp-chart"></div>';
     if (!rows.length) {
       body += "</section>";
@@ -812,11 +828,11 @@
     });
   }
 
-  function mountMrpChart(ge2024Rows, mrpRows) {
+  function mountMrpChart(ge2024Rows, mrpRows, localRows, showLocal) {
     var container = document.getElementById("mrp-chart");
     if (!container) return;
 
-    var points = []; // {t, party, share, kind:'actual'|'projected', label}
+    var points = []; // {t, party, share, kind:'actual'|'projected'|'local', label, group}
     if (ge2024Rows && ge2024Rows.length) {
       var gIdx = colIndex(COLS.ge2024);
       ge2024Rows.forEach(function (r) {
@@ -832,6 +848,17 @@
         points.push({
           t: Date.parse(r[mIdx.publish_date] + "T00:00:00Z"), party: r[mIdx.party], share: r[mIdx.vote_share_pct],
           kind: "projected", label: r[mIdx.pollster] + " MRP (" + r[mIdx.publish_date] + ")",
+        });
+      });
+    }
+    if (showLocal && localRows && localRows.length) {
+      var lIdx = colIndex(COLS.local_council);
+      localRows.forEach(function (r) {
+        var la = r[lIdx.la_name];
+        points.push({
+          t: Date.parse(r[lIdx.election_date] + "T00:00:00Z"), party: r[lIdx.party], share: r[lIdx.avg_vote_share_pct],
+          kind: "local", group: r[lIdx.party] + "|" + la,
+          label: la + " local election (" + r[lIdx.election_date] + ")",
         });
       });
     }
@@ -887,6 +914,15 @@
       svg.appendChild(geLabel);
     }
 
+    // Local-council groups get a dash pattern keyed by council (la_name),
+    // consistent across parties, so a two-council seat (e.g. Gorton and
+    // Denton spanning Manchester/Tameside) reads as "two distinct councils"
+    // rather than as noise — party still carries the color.
+    var localLaNames = [];
+    points.forEach(function (p) { if (p.kind === "local" && localLaNames.indexOf(p.group.split("|")[1]) === -1) localLaNames.push(p.group.split("|")[1]); });
+    var DASH_PATTERNS = ["3 2", "1 2", "5 2 1 2", "2 2 6 2"];
+    function dashFor(la) { return DASH_PATTERNS[localLaNames.indexOf(la) % DASH_PATTERNS.length]; }
+
     var actualLineByParty = {};
     parties.forEach(function (party) {
       var color = partyColour(party);
@@ -926,6 +962,31 @@
         });
         svg.appendChild(marker);
       });
+
+      // Local council results: thin dashed line (dash pattern keyed by
+      // council) + hollow triangle markers, kept visually distinct from
+      // the solid MRP line and the diamond GE2024 marker.
+      var localGroups = {};
+      var localGroupOrder = [];
+      points.filter(function (p) { return p.party === party && p.kind === "local"; }).forEach(function (p) {
+        if (!localGroups[p.group]) { localGroups[p.group] = []; localGroupOrder.push(p.group); }
+        localGroups[p.group].push(p);
+      });
+      localGroupOrder.forEach(function (group) {
+        var la = group.split("|")[1];
+        var pts = localGroups[group].sort(function (a, b) { return a.t - b.t; });
+        if (pts.length > 1) {
+          var ld = pts.map(function (p, i) { return (i === 0 ? "M" : "L") + xOf(p.t) + "," + yOf(p.share); }).join(" ");
+          svg.appendChild(svgEl("path", {
+            class: "chart-local-line", d: ld, stroke: color, "stroke-dasharray": dashFor(la),
+          }));
+        }
+        pts.forEach(function (p) {
+          var x = xOf(p.t), y = yOf(p.share), s = 4.5;
+          var td = "M" + x + "," + (y - s) + " L" + (x + s) + "," + (y + s) + " L" + (x - s) + "," + (y + s) + " Z";
+          svg.appendChild(svgEl("path", { class: "chart-local-marker", d: td, stroke: color }));
+        });
+      });
     });
 
     var crosshair = svgEl("line", { class: "chart-crosshair", x1: 0, x2: 0, y1: MT, y2: MT + plotH, visibility: "hidden" });
@@ -946,6 +1007,19 @@
       legend.appendChild(item);
     });
     container.appendChild(legend);
+
+    if (localLaNames.length > 1) {
+      var councilLegend = document.createElement("div");
+      councilLegend.className = "chart-legend chart-legend-councils";
+      localLaNames.forEach(function (la) {
+        var item = document.createElement("span");
+        item.className = "party";
+        item.innerHTML = '<svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="currentColor" stroke-width="1.5" stroke-dasharray="' +
+          dashFor(la) + '"></line></svg> ' + escapeHtml(la);
+        councilLegend.appendChild(item);
+      });
+      container.appendChild(councilLegend);
+    }
 
     function nearestTimeIndex(mouseX) {
       var best = 0, bestDist = Infinity;
@@ -970,8 +1044,9 @@
       var sourceLabel = atTime.length ? atTime[0].label : "";
       var html = '<div class="tt-date">' + escapeHtml(sourceLabel) + "</div>";
       atTime.forEach(function (p) {
+        var suffix = p.kind === "actual" ? " (actual)" : (p.kind === "local" ? " (local, " + escapeHtml(p.group.split("|")[1]) + ")" : "");
         html += '<div class="tt-row"><span class="swatch" style="background:' + partyColour(p.party) + '"></span>' +
-          escapeHtml(p.party) + " " + fmtPct(p.share) + (p.kind === "actual" ? " (actual)" : "") + "</div>";
+          escapeHtml(p.party) + " " + fmtPct(p.share) + suffix + "</div>";
       });
       tooltip.innerHTML = html;
       tooltip.style.visibility = "visible";
