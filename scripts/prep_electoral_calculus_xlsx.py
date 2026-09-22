@@ -62,7 +62,16 @@ def find_header_row(ws):
 def build_column_map(cells):
     """Two side-by-side tables (With TV / No TV) share column NAMES but not
     positions — find the second 'Seat Name' to split them, then map each
-    table's columns by name rather than fixed index."""
+    table's columns by name rather than fixed index.
+
+    Some releases have a THIRD section sharing this header row after the
+    No-TV table (e.g. the Dec 2025 file has "Q3. Top Three Cost-of-living
+    Issues" with columns like Energy/Food/Tax/Housing) — those are survey
+    questions, not party vote shares, and would be silently ingested as
+    fake minor parties with 50%+ "vote share" if swept up by a naive
+    "everything to the end of the row" slice. Bound each table by its own
+    "Predicted Winner" sentinel column instead of by the next table's
+    start / the row's end."""
     first_seat_col = cells.index("Seat Name")
     second_seat_col = cells.index("Seat Name", first_seat_col + 1)
 
@@ -74,8 +83,19 @@ def build_column_map(cells):
                 out[name] = i
         return out
 
-    with_tv = slice_cols(first_seat_col, second_seat_col)
-    no_tv = slice_cols(second_seat_col, len(cells))
+    def find_after(label, fallback):
+        try:
+            return cells.index(label) + 1
+        except ValueError:
+            print(f"  WARNING: sentinel column {label!r} not found — falling back to a wider column range; "
+                  f"double-check the printed 'other party columns' list isn't picking up something unrelated")
+            return fallback
+
+    end_with_tv = find_after("Predicted Winner (with TV)", second_seat_col)
+    end_no_tv = find_after("Predicted Winner (no TV)", len(cells))
+
+    with_tv = slice_cols(first_seat_col, min(end_with_tv, second_seat_col))
+    no_tv = slice_cols(second_seat_col, end_no_tv)
     return with_tv, no_tv
 
 

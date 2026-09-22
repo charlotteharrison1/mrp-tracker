@@ -122,6 +122,21 @@ is for whichever session (or agent) picks this project up next.
   names produce a suspiciously identical score for two candidates, that's
   this bug pattern recurring — check with token_sort_ratio, don't just
   trust the top WRatio hit.**
+- **`prep_electoral_calculus_xlsx.py` had a real bug that would have
+  silently loaded survey-issue data as fake political parties.** The Jan
+  2026 release (`DataTables_VIDec2025.xlsx`) has a third section — "Q3.
+  Top Three Cost-of-living Issues" (Energy/Food/Tax/Housing/Wages/Fuel/
+  Childcare/Student Loan) — sharing the same header row as the No-TV
+  seat table, positioned right after it. The original column-mapping
+  logic took "everything from the second 'Seat Name' to the end of the
+  row" as the No-TV table's columns, which swept this section up too —
+  each issue would have been ingested as a minor party with a 50%+ "vote
+  share." Fixed by bounding each table to end right after its own
+  "Predicted Winner" sentinel column instead of at the row's end or the
+  next table's start. **Always check the prep script's printed "Party
+  columns not in the fixed map" list before trusting an ingest** — if
+  something on it isn't obviously a party name, stop and inspect the
+  sheet directly (`openpyxl`, print the header row) before proceeding.
 - **LEAP CSV column order isn't stable across eras.** Modern exports
   (confirmed on Westminster 2022) are
   `council, ward, "", ward_code(GSS), candidate, party, votes, status` —
