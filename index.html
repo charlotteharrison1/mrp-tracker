@@ -399,8 +399,8 @@
       (c.speaker ? " · <strong>Speaker's seat</strong> (conventionally excluded from swing/MRP modelling)" : "") +
       "</p>";
 
-    html += renderGe2024(d.ge2024);
     html += renderMrp(d.ge2024, d.mrp);
+    html += renderGe2024(d.ge2024);
     html += renderLocalByCouncil(d.local_council, d.local_wards);
 
     els.detail.innerHTML = html;
