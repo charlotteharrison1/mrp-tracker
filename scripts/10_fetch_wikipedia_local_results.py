@@ -29,6 +29,7 @@ import sqlite3
 import sys
 import time
 import csv
+from collections import defaultdict
 from pathlib import Path
 
 import requests
@@ -247,16 +248,44 @@ def main():
         ).fetchone()[0]
         cur.execute("DELETE FROM local_election_ward_results WHERE election_id=?", (election_id,))
 
-        insert_rows = []
-        for ward_name, candidate_rows in ward_tables:
+        # First pass: match every ward name to a ward_code, THEN check for
+        # collisions (two different ward names matching the same code)
+        # before inserting anything. This catches two real patterns found
+        # the hard way (see docs/data_notes.md): a 2026 boundary review
+        # splitting one old ward into two new ones that both fuzzy-match
+        # the single pre-split code we have (e.g. Calderdale's old
+        # "Todmorden" vs new "Hebden Bridge & Todmorden East" +
+        # "Todmorden West"), and a same-day casual-vacancy by-election
+        # table alongside the main election for the same ward (e.g.
+        # "Town" + "Town by-election"). Either way, matching both onto one
+        # ward_code would silently double-count that ward's vote share —
+        # same principle as prep_bestforbritain_pdf.py's collision net:
+        # reject an ambiguous match rather than guess which one is right.
+        raw_matches = {}
+        for ward_name, _ in ward_tables:
             clean_name = ward_name.replace("&", "and")
-            ward_code = None
+            code, score = (None, 0)
             if all_ward_names:
                 match, score = best_match(clean_name, all_ward_names)
                 if score >= WARD_MATCH_THRESHOLD:
-                    ward_code = ward_name_to_code[match]
-                else:
+                    code = ward_name_to_code[match]
+            raw_matches[ward_name] = code
+
+        code_claimants = defaultdict(list)
+        for ward_name, code in raw_matches.items():
+            if code:
+                code_claimants[code].append(ward_name)
+        for code, claimants in code_claimants.items():
+            if len(claimants) > 1:
+                print(f"    WARD COLLISION in {c['display_name']!r}: {claimants} all matched "
+                      f"{code!r} — leaving all of them unmatched rather than guessing.")
+                for ward_name in claimants:
+                    raw_matches[ward_name] = None
                     totals["ward_match_failures"] += 1
+
+        insert_rows = []
+        for ward_name, candidate_rows in ward_tables:
+            ward_code = raw_matches[ward_name]
             seats_available = max(sum(1 for r in candidate_rows if r["elected"]), 1)
             # Self-derive vote_share_pct from votes (candidate's votes over
             # the sum of every candidate's votes in this ward) instead of

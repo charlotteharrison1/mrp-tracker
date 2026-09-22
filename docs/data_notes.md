@@ -386,3 +386,45 @@ is for whichever session (or agent) picks this project up next.
   justification for it — three unrelated bugs were hiding behind one
   plausible-sounding comment ("avoids double-counting... same approach
   [X] used").
+- **2026-09-22 — a 4th bug, found while checking whether the fixes above
+  were complete: two DIFFERENT ward names matching the SAME ward_code.**
+  After the three fixes above, a full sweep of all 1,471 (constituency,
+  council, date) combinations found 2 that were still slightly OVER
+  100% (Bradford 103.3%, Calderdale 101.7% for 2026) — the "over 100%"
+  signature specifically means double-counting, not one of the three
+  already-fixed causes (which only ever push totals under or, in the
+  cross-ward case, moderately over from a different mechanism). Traced
+  to real ward-name collisions:
+  - **Boundary-review splits**: Calderdale's old "Todmorden" ward
+    (one ward_code in our July-2024 ONS lookup) was split into
+    "Hebden Bridge & Todmorden East" and "Todmorden West" for 2026;
+    Bradford's "Bingley" similarly split into "Bingley East"/"Bingley
+    West"; same pattern in Kirklees (Colne Valley East/West) and
+    Sunderland (two pairs). Both new names fuzzy-matched the one old
+    code, so that ward's results got counted twice.
+  - **Same-day by-elections**: Tunbridge Wells and Newcastle-under-Lyme
+    both had a "<ward>" table AND a separate "<ward> by-election" table
+    for the same date, both matching the same ward_code.
+  - **A genuinely wrong code in LEAP's own source CSV** (a different,
+    older bug, not a matching issue on our side at all): Epping Forest
+    2024's "Loughton Fairmead" was tagged with neighbouring "Loughton
+    Forest"'s GSS code in LEAP's own data. Confirmed via exact-name
+    match against the ONS lookup (Loughton Fairmead has its own real
+    code, E05015730) and corrected directly.
+  Fixed the two matching-collision patterns the same way
+  `prep_bestforbritain_pdf.py` already handles an equivalent problem:
+  `10_fetch_wikipedia_local_results.py` now does ALL of a council's ward
+  matching first, then checks whether any ward_code was claimed by more
+  than one ward name and un-matches (nulls) every claimant rather than
+  guessing which one is right — a wrongly-collided ward is worse than an
+  unmatched one. Applied retroactively to the 7 already-loaded
+  collisions (171 rows nulled) rather than re-scraping, since only the
+  ward_code assignment was wrong, not the underlying votes. After this,
+  zero (constituency, council, date) combinations sit above 100% — the
+  remaining ~30 below-100% cases are the same uncontested-seat/unusual-
+  system exceptions already documented above, not new bugs.
+  **Lesson for next time**: an "over 100%" reading is specifically the
+  signature of double-counting and should be chased as a DIFFERENT root
+  cause from "under 100%" (missing/excluded data) — don't assume every
+  discrepancy in the same table comes from the same bug just because
+  it's the same symptom category.
