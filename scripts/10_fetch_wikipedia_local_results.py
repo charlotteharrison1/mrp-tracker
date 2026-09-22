@@ -258,10 +258,24 @@ def main():
                 else:
                     totals["ward_match_failures"] += 1
             seats_available = max(sum(1 for r in candidate_rows if r["elected"]), 1)
+            # Self-derive vote_share_pct from votes (candidate's votes over
+            # the sum of every candidate's votes in this ward) instead of
+            # trusting Wikipedia's own "%" column: in a multi-member
+            # (block-vote) ward, Wikipedia reports each candidate's % of
+            # valid BALLOT PAPERS (turnout), not of the combined votes pot,
+            # so those percentages sum to roughly (seats x turnout-per-
+            # ballot-usage), e.g. ~280% across a 3-seat ward - not 100%.
+            # Deriving it ourselves from votes matches the convention LEAP
+            # already uses (and that seats_won_in_ward summing assumes
+            # elsewhere), so every ward's shares sum to 100% regardless of
+            # source. See docs/data_notes.md, the "why don't these add up
+            # to 100%" investigation.
+            ward_total_votes = sum(r["votes"] or 0 for r in candidate_rows)
             for r in candidate_rows:
+                share = round(100 * r["votes"] / ward_total_votes, 2) if (r["votes"] and ward_total_votes) else None
                 insert_rows.append((
                     election_id, ward_code, ward_name, BOUNDARY_YEAR, seats_available,
-                    r["candidate"], r["party"], r["votes"], r["share"], int(r["elected"]),
+                    r["candidate"], r["party"], r["votes"], share, int(r["elected"]),
                 ))
             totals["wards_loaded"] += 1
 

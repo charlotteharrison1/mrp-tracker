@@ -40,10 +40,16 @@ def get_mrp_timeline(con, pcon_code):
 
 def get_local_leaning(con, pcon_code):
     """Most recent local election ward results rolled up for wards mapped to
-    this constituency, weighted by ward_constituency_overlap where present."""
+    this constituency, weighted by ward_constituency_overlap where present.
+    NOTE: unlike navigator_data.json's fetch_local_council(), this simple
+    AVG only counts wards a party actually contested, so — same as the bug
+    documented in docs/data_notes.md 2026-09-22 — a party that skipped its
+    weakest ward will read as stronger here than it really is across the
+    whole constituency. This CLI tool is superseded by the navigator; not
+    worth the same zero-fill rewrite unless it's needed again."""
     return con.execute(
         """
-        SELECT le.election_date, v.party, AVG(v.avg_vote_share_pct * COALESCE(o.weight, 1.0)) AS weighted_share
+        SELECT le.election_date, v.party, AVG(v.ward_vote_share_pct * COALESCE(o.weight, 1.0)) AS weighted_share
         FROM local_election_ward_party_avg v
         JOIN local_election_events le ON le.election_id = v.election_id
         -- ward_code only, not boundary_year — see docs/data_notes.md 2026-09-22

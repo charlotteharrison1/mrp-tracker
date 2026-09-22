@@ -69,29 +69,58 @@ def fetch_mrp(con):
 
 
 def fetch_local_council(con):
-    """Council-level party average per constituency: uses
-    local_election_ward_party_avg (collapses multi-candidate-per-ward
-    distortion) and AVGs across wards within a council-block — NOT SUM,
-    which would overcount (see docs/data_notes.md, the 2026-09-22 fix)."""
-    by_pcon = defaultdict(list)
-    for pcon, la_name, date, party, share, n_wards, page_url, source_url in con.execute(
+    """Council-level party share per constituency, for one (pcon, council,
+    election date): a weighted average, across EVERY ward this constituency
+    has in that council for that date, of local_election_ward_party_avg's
+    now-correct (SUM'd, see schema.sql) per-ward party share.
+
+    The averaging denominator must be every ward in scope, not just the
+    wards a party happened to contest — a party that skipped its weakest
+    ward is NOT "unmeasured" there, it got 0%, and excluding that ward from
+    its average (the previous behaviour) inflated it. Doing this in Python
+    rather than SQL because SQL would need an explicit party x ward cross
+    join to materialise the implied zeros; zero-filling directly in a dict
+    is simpler to get right. With this fix, plus the SUM fix in the view,
+    one council/date's party shares now sum to (very close to) 100%, as an
+    actual result should — see docs/data_notes.md, the "why don't these
+    add up to 100%" investigation."""
+    ward_rows = con.execute(
         """
-        SELECT w.pcon_code, w.la_name, le.election_date, v.party,
-               AVG(v.avg_vote_share_pct * COALESCE(o.weight, 1.0)) AS share,
-               COUNT(DISTINCT v.ward_code) AS n_wards,
-               MAX(le.page_url) AS page_url,
-               MAX(le.source_url) AS source_url
+        SELECT w.pcon_code, w.la_name, le.election_date, v.ward_code, v.party,
+               v.ward_vote_share_pct AS share,
+               COALESCE(o.weight, 1.0) AS weight,
+               le.page_url, le.source_url
         FROM local_election_ward_party_avg v
         JOIN local_election_events le ON le.election_id = v.election_id
         -- ward_code only, not boundary_year — see docs/data_notes.md 2026-09-22
         JOIN wards w ON w.ward_code = v.ward_code
         LEFT JOIN ward_constituency_overlap o
                ON o.ward_code = v.ward_code AND o.boundary_year = w.boundary_year AND o.pcon_code = w.pcon_code
-        GROUP BY w.pcon_code, w.la_name, le.election_date, v.party
-        ORDER BY w.pcon_code, w.la_name, le.election_date DESC
         """
-    ):
-        by_pcon[pcon].append([la_name, date, party, round(share, 2) if share is not None else None, n_wards, page_url, source_url])
+    ).fetchall()
+
+    ward_universe = defaultdict(dict)              # (pcon, la, date) -> {ward_code: weight}
+    party_ward_share = defaultdict(lambda: defaultdict(dict))  # (pcon, la, date) -> party -> {ward_code: share}
+    meta = {}                                       # (pcon, la, date) -> (page_url, source_url)
+    for pcon, la_name, date, ward_code, party, share, weight, page_url, source_url in ward_rows:
+        key = (pcon, la_name, date)
+        ward_universe[key][ward_code] = weight
+        party_ward_share[key][party][ward_code] = share
+        meta[key] = (page_url, source_url)
+
+    by_pcon = defaultdict(list)
+    for key in sorted(ward_universe, key=lambda k: (k[0], k[1], k[2]), reverse=True):
+        pcon, la_name, date = key
+        weights = ward_universe[key]
+        total_weight = sum(weights.values()) or 1.0
+        page_url, source_url = meta[key]
+        rows_for_key = []
+        for party, ward_map in party_ward_share[key].items():
+            weighted_sum = sum((ward_map.get(wc) or 0.0) * wt for wc, wt in weights.items())
+            share = weighted_sum / total_weight
+            rows_for_key.append([la_name, date, party, round(share, 2), len(ward_map), page_url, source_url])
+        rows_for_key.sort(key=lambda r: r[3], reverse=True)
+        by_pcon[pcon].extend(rows_for_key)
     return by_pcon
 
 

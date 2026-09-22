@@ -55,10 +55,14 @@ def render_mrp_trend(con, pcon_code):
 
 
 def render_local_by_council(con, pcon_code):
+    # NOTE: AVGs only over wards a party contested, same caveat as
+    # 05_compare_mrp_vs_actuals.py's get_local_leaning() — see
+    # docs/data_notes.md 2026-09-22. Superseded by the navigator, which
+    # does the full zero-fill-across-all-wards version of this.
     rows = con.execute(
         """
         SELECT w.la_name, le.election_date, v.party,
-               AVG(v.avg_vote_share_pct * COALESCE(o.weight, 1.0)) AS share,
+               AVG(v.ward_vote_share_pct * COALESCE(o.weight, 1.0)) AS share,
                COUNT(DISTINCT v.ward_code) AS n_wards
         FROM local_election_ward_party_avg v
         JOIN local_election_events le ON le.election_id = v.election_id

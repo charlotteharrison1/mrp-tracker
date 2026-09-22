@@ -312,3 +312,77 @@ is for whichever session (or agent) picks this project up next.
   code anyway. Doesn't affect Phase 2 as scoped (2021+), but **don't run
   `03_fetch_leap_results.py` on pre-2011 years without handling this** —
   it'll silently write garbage/empty `ward_code`s.
+- **2026-09-22 — "why don't a council's local-election vote shares add up
+  to 100%?" — three separate, compounding bugs, all in how per-ward
+  candidate rows get rolled up to a council-level party share:**
+  1. **Multi-candidate-per-party wards were AVERAGED, not SUMMED.**
+     `local_election_ward_party_avg` (the view that collapses a block-vote
+     ward's several same-party candidates into one row per party) used
+     `AVG(vote_share_pct)`. Every candidate's `vote_share_pct` is already a
+     share of the SAME ward-wide total-votes pot, so the correct way to
+     recover a party's combined share of that pot is to SUM its
+     candidates, not average them (verified: summing every candidate of
+     every party in a real 3-seat Southwark ward totals exactly 100.0%).
+     AVG instead divided a party's total by however many candidates IT
+     fielded — a full 3-candidate slate that swept a ward got cut to a
+     third of its true share, while a lone minor-party candidate in the
+     same ward kept its full, undivided share. This is what made
+     council-level totals land far BELOW 100% specifically in councils
+     with multi-member wards (e.g. Southwark, ~37% for a ward with a
+     3-candidate LD slate + a 1-candidate Green). Fixed: view now uses
+     `SUM(vote_share_pct) AS ward_vote_share_pct` (renamed from
+     `avg_vote_share_pct` since it's no longer an average). The original
+     comment justified AVG by analogy to "the same approach Opinium used
+     for their 2026 London aggregation" — untraceable and, empirically,
+     wrong for this data; trust the arithmetic check, not an uncited
+     analogy.
+  2. **A party's cross-ward average only counted wards it contested.**
+     `07_export_navigator_data.py`'s `fetch_local_council()` averaged a
+     party's ward shares over `COUNT(DISTINCT ward_code)` **for that
+     party**, i.e. only the wards where it fielded a candidate. A party
+     that skipped its weakest ward isn't "unmeasured" there — it got 0% —
+     so excluding that ward from its own denominator inflates its average
+     (this is what made Gorton and Denton / Manchester read as 111% total:
+     Workers and independents skipped their weaker wards and their
+     averages rode up on the wards they *did* contest). Fixed by rewriting
+     `fetch_local_council()` in Python: build the full ward universe per
+     (pcon, la_name, election_date) first, then average every party over
+     that SAME universe, treating a ward the party didn't contest as 0%
+     there rather than dropping it from the average.
+  3. **Wikipedia's own "%" column isn't the same metric as LEAP's.** For
+     the 111 councils loaded via `10_fetch_wikipedia_local_results.py`
+     (2026-09-22 entry above), the per-candidate `vote_share_pct` was
+     read directly from Wikipedia's own "%" table column. In multi-member
+     wards, that column is each candidate's share of valid BALLOT PAPERS
+     (turnout) — not of the combined votes pot LEAP's numbers are shares
+     of. Since voters in a 3-seat ward can each cast up to 3 votes,
+     summing Wikipedia's own percentages across a full ward totals
+     roughly 3x100% (confirmed: a real Southwark 2026 ward summed to
+     283%), not 100%. `local_election_council_summary` (the separate
+     council-wide summary table) already self-derived its own
+     `vote_share_pct` from `votes` instead of trusting Wikipedia's column
+     — the ward-level table just hadn't been given the same treatment.
+     Fixed the same way: `10_fetch_wikipedia_local_results.py` now
+     computes each candidate's `vote_share_pct` as
+     `100 * votes / sum(votes in that ward)`, discarding Wikipedia's own
+     percentage entirely; a one-off migration (not re-scraping — the raw
+     `votes` values were already correct) recomputed all 17,719 already-
+     loaded Wikipedia ward-result rows the same way.
+
+  **After all three fixes**: 1437 of 1471 (pcon, council, election-date)
+  combinations across the whole dataset sum to within 1 percentage point
+  of 100%. The remaining ~34 are genuine, explicable exceptions, not
+  bugs: uncontested wards (very common in Welsh/Scottish local elections
+  — a seat "elected unopposed" has no recorded vote to attribute to any
+  party, so it correctly drags that ward's contribution below 100%
+  instead of being silently excluded) and a handful of places with
+  non-partisan/unusual electoral systems (City of London, Isles of
+  Scilly). Not chased further — same standard applied elsewhere in this
+  project (e.g. Survation's genuinely-blank seats): a printed/documented
+  exception beats a forced fit.
+  **Lesson for next time**: when a metric is supposed to sum to a known
+  total (100% of a vote), and it doesn't, verify against raw per-ward
+  candidate data by hand before trusting either the SQL or a comment's
+  justification for it — three unrelated bugs were hiding behind one
+  plausible-sounding comment ("avoids double-counting... same approach
+  [X] used").

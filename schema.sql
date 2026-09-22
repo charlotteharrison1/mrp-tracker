@@ -146,14 +146,24 @@ CREATE TABLE IF NOT EXISTS local_election_council_summary (
     PRIMARY KEY (election_id, party)
 );
 
--- Party-average-per-ward view: avoids the "some parties stand fewer
--- candidates in multi-member wards" distortion (same approach Opinium used
--- for their 2026 London aggregation) when rolling ward results up to
--- constituency level.
+-- Party's share of ONE ward's vote, collapsing multiple same-party
+-- candidates in a block-vote (multi-member) ward into a single row.
+-- MUST be SUM, not AVG: every candidate's vote_share_pct is already a
+-- share of the SAME ward-wide total-votes pot, so summing a party's
+-- candidates recovers its true combined share of that pot (verified:
+-- summing every candidate of every party in a 3-seat ward totals
+-- exactly 100%). An earlier version used AVG here on the theory that it
+-- corrected for "some parties stand fewer candidates than others" - it
+-- did the opposite: it divided a party's total by however many
+-- candidates THAT party fielded, so a full 3-candidate slate that swept
+-- a ward got cut to a third of its true share while a lone minor-party
+-- candidate in the same ward kept its full, undivided share. That's
+-- what made council-level totals land far below 100% in wards with
+-- multi-member councils (e.g. Southwark) - see docs/data_notes.md.
 CREATE VIEW IF NOT EXISTS local_election_ward_party_avg AS
 SELECT
     result_id_min.election_id, r.ward_code, r.ward_name_raw, r.boundary_year, r.party,
-    AVG(r.vote_share_pct) AS avg_vote_share_pct,
+    SUM(r.vote_share_pct) AS ward_vote_share_pct,
     SUM(r.elected) AS seats_won_in_ward
 FROM local_election_ward_results r
 JOIN (SELECT MIN(result_id) AS result_id_min, election_id, ward_name_raw
