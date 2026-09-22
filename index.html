@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>UK MRP &amp; Local Elections Tracker</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --surface-raised: #ffffff;
+    --border: #e4e2dc;
+    --text-primary: #1a1a1a;
+    --text-secondary: #55534c;
+    --text-muted: #8a877d;
+    --accent: #2a78d6;
+    --note-bg: #fff8e1;
+    --note-border: #f5c518;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #171715;
+      --surface-raised: #211f1c;
+      --border: #35332d;
+      --text-primary: #f5f4f0;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8a877d;
+      --accent: #6fa8ea;
+      --note-bg: #332c10;
+      --note-border: #c9a300;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #171715;
+    --surface-raised: #211f1c;
+    --border: #35332d;
+    --text-primary: #f5f4f0;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8a877d;
+    --accent: #6fa8ea;
+    --note-bg: #332c10;
+    --note-border: #c9a300;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--surface);
+    color: var(--text-primary);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  header {
+    padding: 1rem clamp(1rem, 3vw, 2rem);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.1rem; margin: 0; }
+  header .meta { font-size: 0.8rem; color: var(--text-muted); }
+  #theme-toggle {
+    background: none; border: 1px solid var(--border); color: var(--text-secondary);
+    border-radius: 6px; padding: 0.3rem 0.7rem; font-size: 0.8rem; cursor: pointer;
+  }
+  .layout {
+    display: flex;
+    min-height: calc(100vh - 60px);
+  }
+  #sidebar {
+    width: 340px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+  #search-wrap { padding: 0.75rem; border-bottom: 1px solid var(--border); }
+  #search {
+    width: 100%; padding: 0.5rem 0.7rem; font-size: 0.95rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-raised); color: var(--text-primary);
+  }
+  #filters { display: flex; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
+  #filters button {
+    font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-raised);
+    color: var(--text-secondary); cursor: pointer;
+  }
+  #filters button.active { background: var(--accent); color: white; border-color: var(--accent); }
+  #list { overflow-y: auto; flex: 1; }
+  #list button.item {
+    display: block; width: 100%; text-align: left; padding: 0.55rem 0.9rem;
+    border: none; border-bottom: 1px solid var(--border); background: none;
+    color: var(--text-primary); cursor: pointer; font-size: 0.88rem;
+  }
+  #list button.item:hover { background: var(--surface-raised); }
+  #list button.item.selected { background: var(--accent); color: white; }
+  #list button.item .nation-tag {
+    display: inline-block; font-size: 0.65rem; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem;
+  }
+  #list button.item.selected .nation-tag { color: rgba(255,255,255,0.85); border-color: rgba(255,255,255,0.5); }
+  #list .empty { padding: 1rem; color: var(--text-muted); font-size: 0.85rem; }
+  main {
+    flex: 1;
+    min-width: 0;
+    padding: clamp(1rem, 3vw, 2rem);
+    overflow-y: auto;
+  }
+  .placeholder { color: var(--text-muted); padding: 2rem 0; }
+  h1.pcon-name { margin: 0 0 0.2rem; font-size: 1.6rem; }
+  .subtitle { color: var(--text-secondary); margin: 0 0 1.5rem; font-size: 0.95rem; }
+  section { margin-bottom: 2rem; }
+  section h2 { font-size: 1.05rem; margin: 0 0 0.6rem; color: var(--text-primary); }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+  th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
+  .party {
+    display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap;
+  }
+  .swatch {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.15);
+  }
+  :root:not([data-theme="light"]) .swatch { border-color: rgba(255,255,255,0.25); }
+  .council-block { margin-bottom: 1.2rem; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .council-block > h3 {
+    margin: 0; padding: 0.5rem 0.8rem; background: var(--surface-raised);
+    font-size: 0.9rem; border-bottom: 1px solid var(--border);
+  }
+  .council-block table { margin: 0; }
+  .council-block td, .council-block th { padding: 0.35rem 0.8rem; }
+  .note { background: var(--note-bg); border-left: 3px solid var(--note-border); padding: 0.6rem 1rem; font-size: 0.88rem; border-radius: 0 6px 6px 0; margin-bottom: 0.8rem; }
+  details.ward-detail { margin-top: 0.4rem; font-size: 0.85rem; }
+  details.ward-detail summary { cursor: pointer; padding: 0.4rem 0.8rem; color: var(--accent); }
+  details.ward-detail table { font-size: 0.8rem; }
+  .stat-row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .stat-row .stat { font-size: 0.85rem; color: var(--text-secondary); }
+  .stat-row .stat strong { color: var(--text-primary); font-size: 1.1rem; display: block; }
+  footer-note { display: block; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.78rem; }
+  @media (max-width: 720px) {
+    .layout { flex-direction: column; }
+    #sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 45vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>UK MRP &amp; Local Elections Tracker</h1>
+  <span class="meta" id="header-meta">Loading…</span>
+  <button id="theme-toggle" type="button">Toggle theme</button>
+</header>
+
+<div class="layout">
+  <div id="sidebar">
+    <div id="search-wrap">
+      <input id="search" type="text" placeholder="Search constituency…" autocomplete="off">
+      <div id="filters"></div>
+    </div>
+    <div id="list"></div>
+  </div>
+  <main id="detail">
+    <p class="placeholder">Select a constituency on the left, or search by name.</p>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Recognisable party identity colours (used as small swatches, never as a
+  // filled background under white text — several official colours, e.g.
+  // SNP yellow and Lib Dem orange, fail text contrast as solid fills).
+  var PARTY_COLOURS = {
+    "Lab": "#E4003B", "Lab Co-op": "#E4003B",
+    "C": "#0087DC", "Con": "#0087DC",
+    "LD": "#FAA61A",
+    "Grn": "#02A95B", "Green": "#02A95B",
+    "RUK": "#12B6CF", "Reform": "#12B6CF", "Reform UK": "#12B6CF",
+    "SNP": "#EDB700",
+    "PC": "#3F8428", "Plaid Cymru": "#3F8428",
+    "Ind": "#8a877d", "Independent": "#8a877d"
+  };
+  // Deterministic fallback palette for every other party code seen in the
+  // data (minor/local parties) — distinct hues, not asserted as official
+  // brand colours, just a stable, distinguishable identity per code.
+  var FALLBACK_HUES = ["#4a3aa7", "#e87ba4", "#8a5a2b", "#1baf7a", "#b23a6b", "#6d6d1a", "#3a6d8a", "#9a4a1a"];
+  var fallbackCache = {};
+  function hashCode(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+    return Math.abs(h);
+  }
+  function partyColour(p) {
+    if (PARTY_COLOURS[p]) return PARTY_COLOURS[p];
+    if (!fallbackCache[p]) fallbackCache[p] = FALLBACK_HUES[hashCode(p) % FALLBACK_HUES.length];
+    return fallbackCache[p];
+  }
+  function partyChip(p) {
+    return '<span class="party"><span class="swatch" style="background:' + partyColour(p) + '"></span>' + escapeHtml(p) + '</span>';
+  }
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmtPct(n) { return (n == null) ? "—" : n.toFixed(1) + "%"; }
+  function fmtDate(d) { return d || "—"; }
+
+  var DATA = null;
+  var COLS = null;
+  var selectedCode = null;
+  var nationFilter = null;
+  var els = {
+    search: document.getElementById("search"),
+    filters: document.getElementById("filters"),
+    list: document.getElementById("list"),
+    detail: document.getElementById("detail"),
+    headerMeta: document.getElementById("header-meta"),
+    themeToggle: document.getElementById("theme-toggle")
+  };
+
+  // --- theme toggle (viewer preference, persisted locally only) ---
+  (function initTheme() {
+    var saved = null;
+    try { saved = localStorage.getItem("uket-theme"); } catch (e) {}
+    if (saved) document.documentElement.setAttribute("data-theme", saved);
+    els.themeToggle.addEventListener("click", function () {
+      var current = document.documentElement.getAttribute("data-theme");
+      var next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      try { localStorage.setItem("uket-theme", next); } catch (e) {}
+    });
+  })();
+
+  fetch("navigator_data.json")
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (data) {
+      DATA = data;
+      COLS = data.meta.columns;
+      boot();
+    })
+    .catch(function (err) {
+      els.detail.innerHTML = '<p class="placeholder">Could not load navigator_data.json (' +
+        escapeHtml(err.message) + '). If you opened this file directly from disk, ' +
+        'serve it over HTTP instead (e.g. <code>python3 -m http.server</code>) — browsers ' +
+        'block fetch() of local files from file:// pages.</p>';
+      els.headerMeta.textContent = "Failed to load data";
+    });
+
+  function boot() {
+    var c = DATA.meta.counts;
+    els.headerMeta.textContent =
+      c.constituencies + " constituencies · " +
+      c.local_ward_rows + " local ward results · " +
+      c.ge2024_rows + " GE2024 rows · " +
+      c.mrp_rows + " MRP rows · generated " + DATA.meta.generated_at.slice(0, 10);
+
+    var nations = [];
+    DATA.constituencies.forEach(function (c) { if (nations.indexOf(c.nation) === -1) nations.push(c.nation); });
+    nations.forEach(function (n) {
+      var btn = document.createElement("button");
+      btn.type = "button"; btn.textContent = n;
+      btn.addEventListener("click", function () {
+        nationFilter = (nationFilter === n) ? null : n;
+        Array.prototype.forEach.call(els.filters.children, function (b) { b.classList.toggle("active", b === btn && nationFilter); });
+        renderList();
+      });
+      els.filters.appendChild(btn);
+    });
+
+    els.search.addEventListener("input", renderList);
+    renderList();
+
+    window.addEventListener("hashchange", applyHash);
+    applyHash();
+  }
+
+  function applyHash() {
+    var code = decodeURIComponent(location.hash.replace(/^#/, ""));
+    if (code && DATA.by_pcon.hasOwnProperty(code)) selectConstituency(code, true);
+  }
+
+  function renderList() {
+    var q = els.search.value.trim().toLowerCase();
+    var items = DATA.constituencies.filter(function (c) {
+      if (nationFilter && c.nation !== nationFilter) return false;
+      if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    });
+    els.list.innerHTML = "";
+    if (!items.length) {
+      els.list.innerHTML = '<p class="empty">No constituencies match.</p>';
+      return;
+    }
+    var frag = document.createDocumentFragment();
+    items.forEach(function (c) {
+      var btn = document.createElement("button");
+      btn.className = "item" + (c.code === selectedCode ? " selected" : "");
+      btn.innerHTML = escapeHtml(c.name) + '<span class="nation-tag">' + escapeHtml(shortNation(c.nation)) + "</span>";
+      btn.addEventListener("click", function () { selectConstituency(c.code); });
+      frag.appendChild(btn);
+    });
+    els.list.appendChild(frag);
+  }
+
+  function shortNation(n) {
+    return { "England": "Eng", "Scotland": "Sco", "Wales": "Wal", "Northern Ireland": "NI" }[n] || n;
+  }
+
+  function selectConstituency(code, fromHash) {
+    selectedCode = code;
+    renderList();
+    renderDetail(code);
+    if (!fromHash) {
+      history.replaceState(null, "", "#" + encodeURIComponent(code));
+    }
+  }
+
+  function renderDetail(code) {
+    var c = DATA.constituencies.find(function (x) { return x.code === code; });
+    var d = DATA.by_pcon[code] || { ge2024: [], mrp: [], local_council: [], local_wards: [] };
+    if (!c) { els.detail.innerHTML = '<p class="placeholder">Not found.</p>'; return; }
+
+    var html = "";
+    html += '<h1 class="pcon-name">' + escapeHtml(c.name) + "</h1>";
+    html += '<p class="subtitle">' + escapeHtml(c.nation) + (c.region ? " · " + escapeHtml(c.region) : "") +
+      " · 2024 MP: " + escapeHtml(c.mp || "—") + (c.party ? " (" + partyChip(c.party) + ")" : "") +
+      (c.majority != null ? " · majority " + c.majority.toLocaleString() : "") +
+      (c.speaker ? " · <strong>Speaker's seat</strong> (conventionally excluded from swing/MRP modelling)" : "") +
+      "</p>";
+
+    html += renderGe2024(d.ge2024);
+    html += renderMrp(d.mrp);
+    html += renderLocalByCouncil(d.local_council, d.local_wards);
+
+    els.detail.innerHTML = html;
+    els.detail.scrollTop = 0;
+    wireWardDetailToggles(d.local_wards);
+  }
+
+  function renderGe2024(rows) {
+    var body = "<section><h2>GE2024 baseline</h2>";
+    if (!rows.length) {
+      body += '<p class="placeholder">Not loaded yet (Phase 3).</p></section>';
+      return body;
+    }
+    var idx = colIndex(COLS.ge2024);
+    body += '<div class="stat-row">';
+    rows.forEach(function (r) {
+      body += '<div class="stat">' + partyChip(r[idx.party]) + '<strong>' + fmtPct(r[idx.vote_share_pct]) + '</strong></div>';
+    });
+    body += "</div></section>";
+    return body;
+  }
+
+  function renderMrp(rows) {
+    var body = "<section><h2>MRP projections over time</h2>";
+    if (!rows.length) {
+      body += '<p class="placeholder">No MRP releases loaded yet for this seat (Phase 4).</p></section>';
+      return body;
+    }
+    var idx = colIndex(COLS.mrp);
+    // Group by (pollster, publish_date) to show each release's full party spread.
+    var releases = {};
+    var order = [];
+    rows.forEach(function (r) {
+      var key = r[idx.publish_date] + "|" + r[idx.pollster];
+      if (!releases[key]) { releases[key] = []; order.push(key); }
+      releases[key].push(r);
+    });
+    body += "<table><thead><tr><th>Date</th><th>Pollster</th><th>Parties (vote share)</th></tr></thead><tbody>";
+    order.forEach(function (key) {
+      var group = releases[key].slice().sort(function (a, b) { return (a[idx.rank] || 99) - (b[idx.rank] || 99); });
+      var first = group[0];
+      var spread = group.map(function (r) {
+        return partyChip(r[idx.party]) + " " + fmtPct(r[idx.vote_share_pct]);
+      }).join(" &nbsp; ");
+      body += "<tr><td>" + escapeHtml(first[idx.publish_date]) + "</td><td>" + escapeHtml(first[idx.pollster]) +
+        "</td><td>" + spread + "</td></tr>";
+    });
+    body += "</tbody></table></section>";
+    return body;
+  }
+
+  function renderLocalByCouncil(councilRows, wardRows) {
+    var body = "<section><h2>Local election results by council</h2>";
+    if (!councilRows.length) {
+      body += '<p class="placeholder">No local election data loaded yet for wards in this seat.</p></section>';
+      return body;
+    }
+    var idx = colIndex(COLS.local_council);
+    var byCouncil = {};
+    var councilOrder = [];
+    councilRows.forEach(function (r) {
+      var la = r[idx.la_name];
+      if (!byCouncil[la]) { byCouncil[la] = []; councilOrder.push(la); }
+      byCouncil[la].push(r);
+    });
+
+    if (councilOrder.length > 1) {
+      body += '<p class="note">This constituency crosses <strong>' + councilOrder.length +
+        ' councils</strong> — compare the blocks below to see whether they lean differently.</p>';
+    }
+
+    var wardIdx = colIndex(COLS.local_wards);
+
+    councilOrder.forEach(function (la) {
+      var rows = byCouncil[la].slice().sort(function (a, b) {
+        if (a[idx.election_date] !== b[idx.election_date]) return a[idx.election_date] < b[idx.election_date] ? 1 : -1;
+        return b[idx.avg_vote_share_pct] - a[idx.avg_vote_share_pct];
+      });
+      body += '<div class="council-block"><h3>' + escapeHtml(la) + "</h3>";
+      body += "<table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th># wards</th></tr></thead><tbody>";
+      rows.forEach(function (r) {
+        body += "<tr><td>" + fmtDate(r[idx.election_date]) + "</td><td>" + partyChip(r[idx.party]) +
+          "</td><td>" + fmtPct(r[idx.avg_vote_share_pct]) + "</td><td>" + r[idx.n_wards] + "</td></tr>";
+      });
+      body += "</tbody></table>";
+
+      var wardsForCouncil = (wardRows || []).filter(function (w) { return w[wardIdx.la_name] === la; });
+      if (wardsForCouncil.length) {
+        body += '<details class="ward-detail" data-la="' + escapeHtml(la) +
+          '"><summary>Show ' + wardsForCouncil.length + ' ward-level candidate results</summary><div class="ward-detail-body"></div></details>';
+      }
+      body += "</div>";
+    });
+    body += "</section>";
+    return body;
+  }
+
+  function wireWardDetailToggles(wardRows) {
+    var wardIdx = colIndex(COLS.local_wards);
+    Array.prototype.forEach.call(document.querySelectorAll("details.ward-detail"), function (det) {
+      det.addEventListener("toggle", function () {
+        if (!det.open || det.dataset.rendered) return;
+        det.dataset.rendered = "1";
+        var la = det.getAttribute("data-la");
+        var rows = wardRows.filter(function (w) { return w[wardIdx.la_name] === la; })
+          .sort(function (a, b) {
+            if (a[wardIdx.ward_name] !== b[wardIdx.ward_name]) return a[wardIdx.ward_name] < b[wardIdx.ward_name] ? -1 : 1;
+            if (a[wardIdx.election_date] !== b[wardIdx.election_date]) return a[wardIdx.election_date] < b[wardIdx.election_date] ? 1 : -1;
+            return (b[wardIdx.votes] || 0) - (a[wardIdx.votes] || 0);
+          });
+        var html = "<table><thead><tr><th>Ward</th><th>Date</th><th>Candidate</th><th>Party</th><th>Votes</th><th>Share</th><th>Elected</th></tr></thead><tbody>";
+        rows.forEach(function (w) {
+          html += "<tr><td>" + escapeHtml(w[wardIdx.ward_name]) + "</td><td>" + fmtDate(w[wardIdx.election_date]) +
+            "</td><td>" + escapeHtml(w[wardIdx.candidate_name]) + "</td><td>" + partyChip(w[wardIdx.party]) +
+            "</td><td>" + (w[wardIdx.votes] == null ? "—" : w[wardIdx.votes].toLocaleString()) +
+            "</td><td>" + fmtPct(w[wardIdx.vote_share_pct]) + "</td><td>" + (w[wardIdx.elected] ? "✓" : "") + "</td></tr>";
+        });
+        html += "</tbody></table>";
+        det.querySelector(".ward-detail-body").innerHTML = html;
+      });
+    });
+  }
+
+  function colIndex(names) {
+    var idx = {};
+    names.forEach(function (n, i) { idx[n] = i; });
+    return idx;
+  }
+})();
+</script>
+</body>
+</html>
