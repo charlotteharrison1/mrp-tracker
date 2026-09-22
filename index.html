@@ -456,7 +456,7 @@
     }
     body += '<div class="marker-legend">' +
       '<span class="mk"><svg width="10" height="10"><path d="M5,0 L10,5 L5,10 L0,5 Z" fill="currentColor"></path></svg> Actual result (GE2024) — click a diamond to compare it across the whole chart</span>' +
-      '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection (modelled, not measured)</span>' +
+      '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection</span>' +
       "</div>";
     body += '<div class="chart-wrap" id="mrp-chart"></div>';
     if (!rows.length) {
@@ -683,7 +683,7 @@
     rows.forEach(function (r) { if (dates.indexOf(r[idx.election_date]) === -1) dates.push(r[idx.election_date]); });
     dates.sort();
     if (dates.length < 2) {
-      container.innerHTML = '<p class="placeholder" style="padding:0.5rem 0;">Need at least two elections here to chart a trend — see the table below.</p>';
+      container.remove();
       return;
     }
     var times = dates.map(function (d) { return new Date(d + "T00:00:00Z").getTime(); });
