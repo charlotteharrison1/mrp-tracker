@@ -618,6 +618,42 @@
     for (var k in attrs) el.setAttribute(k, attrs[k]);
     return el;
   }
+  // Draws x-axis tick marks + labels, skipping a label's TEXT (keeping the
+  // tick) when it would visually overlap the last label actually drawn —
+  // dates that cluster closely (e.g. two MRP releases 3 months apart on a
+  // 2-year axis) would otherwise render on top of each other.
+  function renderDateTicks(svg, ticks, y, tickTop, tickBottom) {
+    var CHAR_W = 5.2; // rough px per char at 9px font
+    function bounds(tick, anchor) {
+      var halfWidth = (tick.label.length * CHAR_W) / 2;
+      var left = anchor === "start" ? tick.x : (anchor === "end" ? tick.x - halfWidth * 2 : tick.x - halfWidth);
+      return { left: left, right: left + halfWidth * 2 };
+    }
+    var anchors = ticks.map(function (t, i) { return i === 0 ? "start" : (i === ticks.length - 1 ? "end" : "middle"); });
+    // Reserve the last label's space first so a middle label can never be
+    // drawn on top of it (only the *first* label is unconditionally safe,
+    // since nothing precedes it) — then place the rest left to right.
+    var lastBounds = ticks.length > 1 ? bounds(ticks[ticks.length - 1], anchors[ticks.length - 1]) : null;
+    var lastDrawnRight = -Infinity;
+    var visible = ticks.map(function (tick, i) {
+      svg.appendChild(svgEl("line", { class: "chart-axis", x1: tick.x, x2: tick.x, y1: tickTop, y2: tickBottom }));
+      var isEdge = i === 0 || i === ticks.length - 1;
+      var b = bounds(tick, anchors[i]);
+      if (!isEdge) {
+        if (b.left < lastDrawnRight + 4) return false;
+        if (lastBounds && b.right > lastBounds.left - 4) return false;
+      }
+      lastDrawnRight = b.right;
+      return true;
+    });
+    ticks.forEach(function (tick, i) {
+      if (!visible[i]) return;
+      var t = svgEl("text", { class: "chart-axis-label", x: tick.x, y: y, "text-anchor": anchors[i] });
+      t.textContent = tick.label;
+      svg.appendChild(t);
+    });
+  }
+
   function niceCeil(v) {
     // Vote shares are 0-100 — round up to the nearest 10 for good vertical
     // resolution (a generic log-scale "nice number" rounder jumps too far,
@@ -680,13 +716,8 @@
     });
     // x axis line + date labels
     svg.appendChild(svgEl("line", { class: "chart-axis", x1: ML, x2: W - MR, y1: MT + plotH, y2: MT + plotH }));
-    dates.forEach(function (d, di) {
-      var x = xOf(di);
-      svg.appendChild(svgEl("line", { class: "chart-axis", x1: x, x2: x, y1: MT + plotH, y2: MT + plotH + 3 }));
-      var t = svgEl("text", { class: "chart-axis-label", x: x, y: H - 4, "text-anchor": di === 0 ? "start" : (di === dates.length - 1 ? "end" : "middle") });
-      t.textContent = d.slice(0, 4);
-      svg.appendChild(t);
-    });
+    renderDateTicks(svg, dates.map(function (d, di) { return { x: xOf(di), label: d.slice(0, 4) }; }),
+      H - 4, MT + plotH, MT + plotH + 3);
 
     // one path per contiguous run of consecutive-date points, per party
     parties.forEach(function (p) {
@@ -831,16 +862,9 @@
     var uniqueTimes = [];
     points.forEach(function (p) { if (uniqueTimes.indexOf(p.t) === -1) uniqueTimes.push(p.t); });
     uniqueTimes.sort(function (a, b) { return a - b; });
-    uniqueTimes.forEach(function (t, i) {
-      var x = xOf(t);
-      svg.appendChild(svgEl("line", { class: "chart-axis", x1: x, x2: x, y1: MT + plotH, y2: MT + plotH + 3 }));
-      var lbl = svgEl("text", {
-        class: "chart-axis-label", x: x, y: H - 4,
-        "text-anchor": i === 0 ? "start" : (i === uniqueTimes.length - 1 ? "end" : "middle"),
-      });
-      lbl.textContent = new Date(t).toISOString().slice(0, 10);
-      svg.appendChild(lbl);
-    });
+    renderDateTicks(svg, uniqueTimes.map(function (t) {
+      return { x: xOf(t), label: new Date(t).toISOString().slice(0, 10) };
+    }), H - 4, MT + plotH, MT + plotH + 3);
 
     parties.forEach(function (party) {
       var color = partyColour(party);

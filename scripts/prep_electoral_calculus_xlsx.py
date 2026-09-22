@@ -16,6 +16,14 @@ scenario instead.
 GB-only releases (Electoral Calculus doesn't model Northern Ireland) will
 produce fewer than 650 rows — that's expected, not a bug.
 
+Column positions are NOT hardcoded — they're read from the header row each
+time, because they move between releases (the Jul 2026 file has a "Restore"
+column the Apr 2026 file doesn't have at all, since Restore Britain hadn't
+registered as a separate line in the model yet). Only column NAMES are
+assumed stable. If a release adds a party name this script doesn't
+recognise, it's carried through verbatim (see OTHER_PARTY_COLS handling)
+rather than silently dropped — check the printed column list either way.
+
 Usage:
     python scripts/prep_electoral_calculus_xlsx.py --xlsx /path/to/DataTables_VIJul2026.xlsx --out data/mrp_prepped/ec_2026-07-08.csv
 """
@@ -32,19 +40,43 @@ ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "uk_elections.db"
 NATION_MATCH_THRESHOLD = 80
 
-# With-TV columns start at index 1 (Seat Name); No-TV mirror starts at index 16.
-COLS_WITH_TV = {
-    "seat_name": 1, "electorate": 2, "CON": 3, "LAB": 4, "LIB": 5, "Reform": 6,
-    "Green": 7, "Restore": 8, "SNP/Plaid": 9, "Minor Party": 10, "Indep/Other": 11,
-}
-COLS_NO_TV = {
-    "seat_name": 16, "CON": 17, "LAB": 18, "LIB": 19, "Reform": 20,
-    "Green": 21, "Restore": 22, "SNP/Plaid": 23, "Minor Party": 24, "Indep/Other": 25,
-}
-
 PARTY_MAP = {"CON": "Con", "LAB": "Lab", "LIB": "LD", "Reform": "RUK", "Green": "Green"}
-HEADER_ROW = 19
-DATA_START_ROW = 20
+# Columns with a known, fixed meaning that aren't a simple party vote share —
+# skipped when scanning "everything else" in the sheet.
+NON_PARTY_COLS = {"seat name", "electorate", "turnout", "predicted winner (with tv)",
+                   "predicted winner (no tv)", "winner 2024"}
+SPECIAL_PARTY_COLS = {"snp/\nplaid": "SNP/Plaid", "minor party": "Minor", "indep/ other": "Ind/Other"}
+
+
+def find_header_row(ws):
+    """The header row number is stable at 19 in both releases seen so far,
+    but scan for it (a row containing both 'Seat Name' and 'CON') rather
+    than trust that forever."""
+    for i, row in enumerate(ws.iter_rows(min_row=1, max_row=30, values_only=True), start=1):
+        cells = [str(c).strip() if c else "" for c in row]
+        if "Seat Name" in cells and "CON" in cells:
+            return i, cells
+    raise ValueError("Could not find a header row containing 'Seat Name' and 'CON' in the first 30 rows")
+
+
+def build_column_map(cells):
+    """Two side-by-side tables (With TV / No TV) share column NAMES but not
+    positions — find the second 'Seat Name' to split them, then map each
+    table's columns by name rather than fixed index."""
+    first_seat_col = cells.index("Seat Name")
+    second_seat_col = cells.index("Seat Name", first_seat_col + 1)
+
+    def slice_cols(start, end):
+        out = {}
+        for i in range(start, end):
+            name = cells[i].strip().lower()
+            if name:
+                out[name] = i
+        return out
+
+    with_tv = slice_cols(first_seat_col, second_seat_col)
+    no_tv = slice_cols(second_seat_col, len(cells))
+    return with_tv, no_tv
 
 
 def load_nation_lookup(con):
@@ -83,8 +115,6 @@ def main():
     parser.add_argument("--with-tv", action="store_true", help="use the tactically-adjusted scenario instead of the raw model")
     args = parser.parse_args()
 
-    cols = COLS_WITH_TV if args.with_tv else COLS_NO_TV
-
     con = sqlite3.connect(DB_PATH)
     nation_lookup = load_nation_lookup(con)
     con.close()
@@ -92,22 +122,38 @@ def main():
     wb = openpyxl.load_workbook(args.xlsx, data_only=True)
     ws = wb[args.sheet]
 
+    header_row_num, cells = find_header_row(ws)
+    with_tv, no_tv = build_column_map(cells)
+    cols = with_tv if args.with_tv else no_tv
+
+    # Classify every column once: known party, SNP/Plaid, catch-all bucket,
+    # a genuinely new party name we haven't seen before, or a non-party
+    # field (seat name, electorate, ...) to ignore.
+    known_lower = {k.lower(): v for k, v in PARTY_MAP.items()}
+    other_party_cols = {}
+    for name, i in cols.items():
+        if name == "seat name" or name in NON_PARTY_COLS or name in known_lower or name in SPECIAL_PARTY_COLS:
+            continue
+        other_party_cols[name.strip().title()] = i
+    if other_party_cols:
+        print(f"  Party columns not in the fixed map, carried through verbatim: {list(other_party_cols.keys())}")
+
     out_rows = []
     n_seats = 0
-    for row in ws.iter_rows(min_row=DATA_START_ROW, max_row=ws.max_row, values_only=True):
-        seat_name = row[cols["seat_name"]]
+    for row in ws.iter_rows(min_row=header_row_num + 1, max_row=ws.max_row, values_only=True):
+        seat_name = row[cols["seat name"]]
         if not seat_name:
             continue
         n_seats += 1
         nation = nation_lookup(seat_name)
 
         for src_party, our_party in PARTY_MAP.items():
-            share = row[cols[src_party]]
+            share = row[cols[src_party.lower()]]
             if share:
                 out_rows.append({"pcon_code": "", "pcon_name": seat_name, "party": our_party,
                                   "vote_share_pct": round(share * 100, 3), "win_probability_pct": ""})
 
-        snp_plaid = row[cols["SNP/Plaid"]]
+        snp_plaid = row[cols["snp/\nplaid"]]
         if snp_plaid:
             party = "SNP" if nation == "Scotland" else ("PC" if nation == "Wales" else None)
             if party is None:
@@ -116,8 +162,14 @@ def main():
                 out_rows.append({"pcon_code": "", "pcon_name": seat_name, "party": party,
                                   "vote_share_pct": round(snp_plaid * 100, 3), "win_probability_pct": ""})
 
-        for src_party, our_party in [("Restore", "Restore"), ("Minor Party", "Minor"), ("Indep/Other", "Ind/Other")]:
-            share = row[cols[src_party]]
+        for src_name, our_party in [("minor party", "Minor"), ("indep/ other", "Ind/Other")]:
+            share = row[cols[src_name]]
+            if share:
+                out_rows.append({"pcon_code": "", "pcon_name": seat_name, "party": our_party,
+                                  "vote_share_pct": round(share * 100, 3), "win_probability_pct": ""})
+
+        for our_party, i in other_party_cols.items():
+            share = row[i]
             if share:
                 out_rows.append({"pcon_code": "", "pcon_name": seat_name, "party": our_party,
                                   "vote_share_pct": round(share * 100, 3), "win_probability_pct": ""})
