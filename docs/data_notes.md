@@ -151,6 +151,41 @@ is for whichever session (or agent) picks this project up next.
   computes rank from vote share itself, so a text `Winner`/`Change`/`GE_winner`
   column is never used — just make sure it's excluded from the party-columns
   scan (`NON_PARTY_COLS`), not treated as a fake party.
+- **Best for Britain's June 2023 MRP (PDF-only source) had a real data-corruption
+  bug, caught before shipping.** `scripts/prep_bestforbritain_pdf.py` extracts
+  a constituency table from a PDF (no CSV/xlsx available at all) via
+  `pdfplumber`. PDF text-wrapping corrupts rows in ways that don't always
+  throw a parse error:
+  1. A long winner/runner-up value ("scottish_national_party") wraps
+     across cells and its tail bleeds into the next cell, contaminating
+     the Labour vote-share ("rty 23.1%" instead of "23.1%") — the digits
+     are still extractable via regex, column count stays correct.
+  2. A long seat name ("Dumfriesshire, Clydesdale and Tweeddale") wraps
+     onto a second line inside its own cell, and pdfplumber splits that
+     into two separate cells.
+  3. **The real bug**: my region-detection allowlist was missing "Eastern"
+     (this PDF's actual label; I'd assumed "East of England"), so every
+     Eastern-region row falsely looked "contaminated" and got needlessly
+     run through the wrap-repair path — actively corrupting otherwise-
+     clean rows. Fallout: 5 real seats (Bedford, Cambridge, Glasgow
+     South, Leeds Central and Headingley, Birmingham Hodge Hill and
+     Solihull North) each ended up with TWO different source rows both
+     claiming to be them, and the ingest script's upsert silently kept
+     whichever came last — meaning the DB held arbitrary, likely-wrong
+     numbers for 5 real seats with no error or warning anywhere.
+  4. Also reused the plain-WRatio fuzzy match here before remembering the
+     tie-break fix from `04_ingest_mrp_release.py`'s `best_match()` (see
+     the "Devon South West" entry above) — same failure pattern
+     ("Glasgow South" vs "Glasgow South East"), same fix, just written
+     twice. **If a third fuzzy-matching call site ever gets added, pull
+     `best_match()` out into somewhere shared instead of copying it
+     again.**
+  Fixed by correcting the region allowlist AND adding a permanent safety
+  net: after matching, any real constituency claimed by more than one
+  source row is rejected entirely (can't tell which is right) rather than
+  silently keeping one. Final yield: 584 of 632 possible seats (92%)
+  passed both the name-match and vote-share-sum validation; the rest are
+  logged with the specific reason, not silently dropped.
 - **LEAP CSV column order isn't stable across eras.** Modern exports
   (confirmed on Westminster 2022) are
   `council, ward, "", ward_code(GSS), candidate, party, votes, status` —
