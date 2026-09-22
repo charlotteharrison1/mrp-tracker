@@ -136,6 +136,8 @@
   .subtitle { color: var(--text-secondary); margin: 0 0 1.5rem; font-size: 0.95rem; }
   section { margin-bottom: 2rem; }
   section h2 { font-size: 1.05rem; margin: 0 0 0.6rem; color: var(--text-primary); }
+  h2.group-heading { font-size: 1.15rem; margin: 0 0 1rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+  section h3 { font-size: 0.95rem; margin: 0 0 0.6rem; color: var(--text-secondary); }
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
   th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
@@ -400,6 +402,7 @@
       "</p>";
 
     html += renderMrp(d.ge2024, d.mrp);
+    html += '<h2 class="group-heading">Actual election results</h2>';
     html += renderGe2024(d.ge2024);
     html += renderLocalByCouncil(d.local_council, d.local_wards);
 
@@ -411,7 +414,7 @@
   }
 
   function renderGe2024(rows) {
-    var body = "<section><h2>GE2024 baseline</h2>";
+    var body = "<section><h3>GE2024 baseline (general election)</h3>";
     if (!rows.length) {
       body += '<p class="placeholder">Not loaded yet (Phase 3).</p></section>';
       return body;
@@ -481,7 +484,7 @@
   }
 
   function renderLocalByCouncil(councilRows, wardRows) {
-    var body = "<section><h2>Local election results by council</h2>";
+    var body = "<section><h3>Local election results by council</h3>";
     if (!councilRows.length) {
       body += '<p class="placeholder">No local election data loaded yet for wards in this seat.</p></section>';
       return body;
