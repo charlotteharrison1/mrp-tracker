@@ -436,8 +436,10 @@
       var spread = group.map(function (r) {
         return partyChip(r[idx.party]) + " " + fmtPct(r[idx.vote_share_pct]);
       }).join(" &nbsp; ");
+      var links = sourceLink(first[idx.source_url], "source") +
+        (first[idx.data_url] ? "<br>" + sourceLink(first[idx.data_url], "download data") : "");
       body += "<tr><td>" + escapeHtml(first[idx.publish_date]) + "</td><td>" + escapeHtml(first[idx.pollster]) +
-        "</td><td>" + spread + "</td><td class=\"source-col\">" + sourceLink(first[idx.source_url]) + "</td></tr>";
+        "</td><td>" + spread + "</td><td class=\"source-col\">" + links + "</td></tr>";
     });
     body += "</tbody></table></section>";
     return body;
@@ -474,9 +476,11 @@
       body += '<div class="chart-wrap" data-chart-la="' + escapeHtml(la) + '"></div>';
       body += "<table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th># wards</th><th>Source</th></tr></thead><tbody>";
       rows.forEach(function (r) {
+        var links = sourceLink(r[idx.source_url], "source") +
+          (r[idx.data_url] ? "<br>" + sourceLink(r[idx.data_url], "csv") : "");
         body += "<tr><td>" + fmtDate(r[idx.election_date]) + "</td><td>" + partyChip(r[idx.party]) +
           "</td><td>" + fmtPct(r[idx.avg_vote_share_pct]) + "</td><td>" + r[idx.n_wards] +
-          "</td><td class=\"source-col\">" + sourceLink(r[idx.source_url]) + "</td></tr>";
+          "</td><td class=\"source-col\">" + links + "</td></tr>";
       });
       body += "</tbody></table>";
 

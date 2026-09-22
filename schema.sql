@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS mrp_releases (
     fieldwork_end   DATE,
     publish_date    DATE NOT NULL,
     sample_size     INTEGER,
-    source_url      TEXT NOT NULL,
+    source_url      TEXT NOT NULL,         -- the pollster's article/blog page (human-readable)
+    data_url        TEXT,                  -- direct link to the downloadable data file (csv/xlsx), if separate from source_url
     archive_url     TEXT,                  -- Wayback Machine snapshot, filled in if the live page dies
     methodology_notes TEXT,
     covers_scotland INTEGER DEFAULT 1,
@@ -117,7 +118,8 @@ CREATE TABLE IF NOT EXISTS local_election_events (
     election_year   INTEGER NOT NULL,
     election_type   TEXT NOT NULL,         -- 'all-out' | 'thirds' | 'halves' | 'by-election'
     boundary_year   INTEGER,               -- links to wards.boundary_year in effect at this election
-    source_url      TEXT,
+    source_url      TEXT,                  -- the raw data file actually fetched (e.g. LEAP's .csv)
+    page_url        TEXT,                  -- the human-readable results page (e.g. LEAP's results/YYYY/ID/ page)
     UNIQUE(la_code, election_date)
 );
 

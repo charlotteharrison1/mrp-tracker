@@ -44,8 +44,9 @@ INDEX_CSV = ROOT / "data" / "leap_council_index.csv"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; uk-elections-tracker/1.0)"}
 
 
-def fetch_and_load_one(con, council_id, year, la_code, la_name, boundary_year, csv_url=None):
+def fetch_and_load_one(con, council_id, year, la_code, la_name, boundary_year, csv_url=None, page_url=None):
     csv_url = csv_url or f"https://www.andrewteale.me.uk/leap/results/{year}/{council_id}.csv"
+    page_url = page_url or (csv_url[:-4] + "/" if csv_url.endswith(".csv") else csv_url)
     resp = requests.get(csv_url, headers=HEADERS, timeout=60)
     if resp.status_code != 200 or not resp.text.strip():
         print(f"  [skip] no data at {csv_url} ({resp.status_code})")
@@ -61,11 +62,11 @@ def fetch_and_load_one(con, council_id, year, la_code, la_name, boundary_year, c
     election_date = f"{year}-05-01"  # LEAP doesn't give exact date in the CSV; refine manually if needed
     cur.execute(
         """INSERT INTO local_election_events (la_code, la_name, leap_council_id, election_date,
-                                                election_year, election_type, boundary_year, source_url)
-           VALUES (?, ?, ?, ?, ?, 'unknown', ?, ?)
-           ON CONFLICT(la_code, election_date) DO UPDATE SET source_url=excluded.source_url
+                                                election_year, election_type, boundary_year, source_url, page_url)
+           VALUES (?, ?, ?, ?, ?, 'unknown', ?, ?, ?)
+           ON CONFLICT(la_code, election_date) DO UPDATE SET source_url=excluded.source_url, page_url=excluded.page_url
            """,
-        (la_code, la_name, str(council_id), election_date, year, boundary_year, csv_url),
+        (la_code, la_name, str(council_id), election_date, year, boundary_year, csv_url, page_url),
     )
     con.commit()
     election_id = cur.execute(
@@ -162,7 +163,7 @@ def main():
             fetch_and_load_one(
                 con, council_id=r["leap_council_id"], year=int(r["year"]),
                 la_code=f"LEAP-{r['leap_council_id']}", la_name=r["council_name"],
-                boundary_year=int(r["year"]), csv_url=r["csv_url"],
+                boundary_year=int(r["year"]), csv_url=r["csv_url"], page_url=r["result_url"],
             )
     else:
         if not all([args.council_id, args.year, args.la_code, args.la_name, args.boundary_year]):

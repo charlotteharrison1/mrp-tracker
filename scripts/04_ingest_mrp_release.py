@@ -59,7 +59,8 @@ def main():
     parser.add_argument("--publish-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--fieldwork-start")
     parser.add_argument("--fieldwork-end")
-    parser.add_argument("--source-url", required=True)
+    parser.add_argument("--source-url", required=True, help="the pollster's article/blog page (human-readable)")
+    parser.add_argument("--data-url", help="direct link to the downloadable data file, if separate from --source-url")
     parser.add_argument("--sample-size", type=int)
     parser.add_argument("--methodology-notes")
     args = parser.parse_args()
@@ -69,11 +70,12 @@ def main():
 
     cur.execute(
         """INSERT INTO mrp_releases (pollster, client, fieldwork_start, fieldwork_end,
-                                       publish_date, sample_size, source_url, methodology_notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(pollster, publish_date, client) DO UPDATE SET source_url=excluded.source_url""",
+                                       publish_date, sample_size, source_url, data_url, methodology_notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(pollster, publish_date, client) DO UPDATE SET
+               source_url=excluded.source_url, data_url=excluded.data_url""",
         (args.pollster, args.client, args.fieldwork_start, args.fieldwork_end,
-         args.publish_date, args.sample_size, args.source_url, args.methodology_notes),
+         args.publish_date, args.sample_size, args.source_url, args.data_url, args.methodology_notes),
     )
     con.commit()
     release_id = cur.execute(
