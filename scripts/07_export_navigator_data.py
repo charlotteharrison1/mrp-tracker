@@ -115,6 +115,58 @@ def fetch_local_wards(con):
     return by_pcon
 
 
+STATIC_SOURCES = [
+    {
+        "phase": 1, "dataset": "Ward → Westminster constituency → LAD lookup (July 2024 vintage)",
+        "source_name": "ONS Open Geography Portal (ArcGIS FeatureServer)",
+        "source_url": "https://geoportal.statistics.gov.uk/datasets/ons::ward-to-westminster-parliamentary-constituency-to-lad-to-utla-july-2024-lookup-in-uk/about",
+        "script": "01_fetch_ons_lookup.py",
+        "note": "650 constituencies, 8,396 wards.",
+    },
+    {
+        "phase": 1, "dataset": "LEAP council/year index",
+        "source_name": "Local Elections Archive Project (Andrew Teale)",
+        "source_url": "https://www.andrewteale.me.uk/leap/elections-index/",
+        "script": "02_fetch_leap_council_index.py",
+        "note": "3,894 rows, 465 councils, years 2002–2026.",
+    },
+    {
+        "phase": 2, "dataset": "Ward-level local election results, 2021–2026",
+        "source_name": "Local Elections Archive Project (Andrew Teale)",
+        "source_url": "https://www.andrewteale.me.uk/leap/elections-index/",
+        "script": "03_fetch_leap_results.py",
+        "note": "One CSV per council per year — see the per-row \"source\"/\"csv\" links on each constituency page for the exact file behind any given number.",
+    },
+    {
+        "phase": 3, "dataset": "GE2024 actual result — every candidate, every constituency",
+        "source_name": "UK Parliament / House of Commons Library official results database",
+        "source_url": "https://electionresults.parliament.uk/general-elections/6",
+        "script": "08_ingest_ge2024_results.py",
+        "note": "4,515 candidate rows, all 650 constituencies. Per-constituency source links are on each seat's GE2024 section.",
+    },
+]
+
+
+def fetch_mrp_releases_meta(con):
+    releases = []
+    for row in con.execute(
+        """SELECT r.release_id, r.pollster, r.client, r.publish_date, r.fieldwork_start, r.fieldwork_end,
+                  r.sample_size, r.source_url, r.data_url, r.methodology_notes,
+                  r.covers_scotland, r.covers_wales, r.covers_ni,
+                  (SELECT COUNT(DISTINCT pcon_code) FROM mrp_constituency_results WHERE release_id = r.release_id) AS n_seats,
+                  (SELECT COUNT(*) FROM mrp_constituency_results WHERE release_id = r.release_id) AS n_rows
+           FROM mrp_releases r ORDER BY r.publish_date"""
+    ):
+        releases.append({
+            "release_id": row[0], "pollster": row[1], "client": row[2], "publish_date": row[3],
+            "fieldwork_start": row[4], "fieldwork_end": row[5], "sample_size": row[6],
+            "source_url": row[7], "data_url": row[8], "methodology_notes": row[9],
+            "covers_scotland": bool(row[10]), "covers_wales": bool(row[11]), "covers_ni": bool(row[12]),
+            "n_seats": row[13], "n_rows": row[14],
+        })
+    return releases
+
+
 def main():
     con = sqlite3.connect(DB_PATH)
 
@@ -123,6 +175,7 @@ def main():
     mrp = fetch_mrp(con)
     local_council = fetch_local_council(con)
     local_wards = fetch_local_wards(con)
+    mrp_releases_meta = fetch_mrp_releases_meta(con)
 
     pcons = [c["code"] for c in constituencies]
     by_pcon = {
@@ -157,6 +210,10 @@ def main():
                 "local_ward_rows": sum(len(v) for v in local_wards.values()),
                 "local_ward_rows_unmatched_to_a_constituency": n_unmatched_ward_rows,
             },
+        },
+        "sources": {
+            "static": STATIC_SOURCES,
+            "mrp_releases": mrp_releases_meta,
         },
         "constituencies": constituencies,
         "by_pcon": by_pcon,

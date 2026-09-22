@@ -68,10 +68,21 @@
   }
   header h1 { font-size: 1.1rem; margin: 0; }
   header .meta { font-size: 0.8rem; color: var(--text-muted); }
-  #theme-toggle {
+  #theme-toggle, #sources-toggle {
     background: none; border: 1px solid var(--border); color: var(--text-secondary);
     border-radius: 6px; padding: 0.3rem 0.7rem; font-size: 0.8rem; cursor: pointer;
   }
+  .sources-page section { margin-bottom: 1.8rem; }
+  .sources-page h3 { font-size: 0.95rem; margin: 1.2rem 0 0.4rem; }
+  .sources-page .card {
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.7rem;
+    background: var(--surface-raised);
+  }
+  .sources-page .card .title { font-weight: 600; margin-bottom: 0.2rem; }
+  .sources-page .card .meta-line { color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 0.3rem; }
+  .sources-page .card .note { margin-top: 0.4rem; }
+  .marker-legend { display: flex; gap: 1.2rem; font-size: 0.78rem; color: var(--text-secondary); margin: 0.3rem 0 0.6rem; }
+  .marker-legend .mk { display: inline-flex; align-items: center; gap: 0.3rem; }
   .layout {
     display: flex;
     flex: 1;
@@ -120,6 +131,7 @@
     overflow-y: auto;
   }
   .placeholder { color: var(--text-muted); padding: 2rem 0; }
+  .text-muted { color: var(--text-muted); }
   h1.pcon-name { margin: 0 0 0.2rem; font-size: 1.6rem; }
   .subtitle { color: var(--text-secondary); margin: 0 0 1.5rem; font-size: 0.95rem; }
   section { margin-bottom: 2rem; }
@@ -181,6 +193,7 @@
 <header>
   <h1>UK MRP &amp; Local Elections Tracker</h1>
   <span class="meta" id="header-meta">Loading…</span>
+  <button id="sources-toggle" type="button">Sources</button>
   <button id="theme-toggle" type="button">Toggle theme</button>
 </header>
 
@@ -258,7 +271,8 @@
     list: document.getElementById("list"),
     detail: document.getElementById("detail"),
     headerMeta: document.getElementById("header-meta"),
-    themeToggle: document.getElementById("theme-toggle")
+    themeToggle: document.getElementById("theme-toggle"),
+    sourcesToggle: document.getElementById("sources-toggle")
   };
 
   // --- theme toggle (viewer preference, persisted locally only) ---
@@ -316,13 +330,24 @@
     els.search.addEventListener("input", renderList);
     renderList();
 
+    els.sourcesToggle.addEventListener("click", function () { showSources(); });
+
     window.addEventListener("hashchange", applyHash);
     applyHash();
   }
 
   function applyHash() {
-    var code = decodeURIComponent(location.hash.replace(/^#/, ""));
-    if (code && DATA.by_pcon.hasOwnProperty(code)) selectConstituency(code, true);
+    var raw = decodeURIComponent(location.hash.replace(/^#/, ""));
+    if (raw === "sources") { showSources(true); return; }
+    if (raw && DATA.by_pcon.hasOwnProperty(raw)) selectConstituency(raw, true);
+  }
+
+  function showSources(fromHash) {
+    selectedCode = null;
+    renderList();
+    els.detail.innerHTML = renderSourcesPage();
+    els.detail.scrollTop = 0;
+    if (!fromHash) history.replaceState(null, "", "#sources");
   }
 
   function renderList() {
@@ -375,13 +400,14 @@
       "</p>";
 
     html += renderGe2024(d.ge2024);
-    html += renderMrp(d.mrp);
+    html += renderMrp(d.ge2024, d.mrp);
     html += renderLocalByCouncil(d.local_council, d.local_wards);
 
     els.detail.innerHTML = html;
     els.detail.scrollTop = 0;
     wireWardDetailToggles(d.local_wards);
     mountTrendCharts(d.local_council);
+    mountMrpChart(d.ge2024, d.mrp);
   }
 
   function renderGe2024(rows) {
@@ -414,10 +440,19 @@
       escapeHtml(label || "source") + " ↗</a>";
   }
 
-  function renderMrp(rows) {
-    var body = "<section><h2>MRP projections over time</h2>";
-    if (!rows.length) {
+  function renderMrp(ge2024Rows, rows) {
+    var body = "<section><h2>MRP projections vs. actual, over time</h2>";
+    if (!rows.length && !(ge2024Rows && ge2024Rows.length)) {
       body += '<p class="placeholder">No MRP releases loaded yet for this seat (Phase 4).</p></section>';
+      return body;
+    }
+    body += '<div class="marker-legend">' +
+      '<span class="mk"><svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="currentColor"></rect></svg> Actual result (GE2024)</span>' +
+      '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection (dashed = modelled, not measured)</span>' +
+      "</div>";
+    body += '<div class="chart-wrap" id="mrp-chart"></div>';
+    if (!rows.length) {
+      body += "</section>";
       return body;
     }
     var idx = colIndex(COLS.mrp);
@@ -493,6 +528,62 @@
     });
     body += "</section>";
     return body;
+  }
+
+  function renderSourcesPage() {
+    var s = DATA.sources || { static: [], mrp_releases: [] };
+    var html = '<div class="sources-page">';
+    html += "<h1>Data sources</h1>";
+    html += '<p class="subtitle">Every dataset behind this site, where it came from, and what script loaded it. ' +
+      "Per-row source links on each constituency page point at the exact file behind that specific number.</p>";
+
+    html += "<section><h2>Reference &amp; baseline data</h2>";
+    var byPhase = {};
+    s.static.forEach(function (src) {
+      byPhase[src.phase] = byPhase[src.phase] || [];
+      byPhase[src.phase].push(src);
+    });
+    Object.keys(byPhase).sort().forEach(function (phase) {
+      html += "<h3>Phase " + phase + "</h3>";
+      byPhase[phase].forEach(function (src) {
+        html += '<div class="card">' +
+          '<div class="title">' + escapeHtml(src.dataset) + "</div>" +
+          '<div class="meta-line">' + escapeHtml(src.source_name) + " · <code>" + escapeHtml(src.script) + "</code></div>" +
+          '<div>' + sourceLink(src.source_url, "view source") + "</div>" +
+          (src.note ? '<div class="note text-muted">' + escapeHtml(src.note) + "</div>" : "") +
+          "</div>";
+      });
+    });
+    html += "</section>";
+
+    html += "<section><h2>MRP releases (" + s.mrp_releases.length + " loaded)</h2>";
+    if (!s.mrp_releases.length) {
+      html += '<p class="placeholder">None loaded yet.</p>';
+    } else {
+      s.mrp_releases.slice().reverse().forEach(function (r) {
+        var coverage = ["GB"];
+        var excluded = [];
+        if (!r.covers_scotland) excluded.push("Scotland");
+        if (!r.covers_wales) excluded.push("Wales");
+        if (!r.covers_ni) excluded.push("NI");
+        var covLabel = excluded.length ? "Excludes " + excluded.join(", ") : "GB + NI";
+        html += '<div class="card">' +
+          '<div class="title">' + escapeHtml(r.pollster) + (r.client ? " (for " + escapeHtml(r.client) + ")" : "") + "</div>" +
+          '<div class="meta-line">Published ' + escapeHtml(r.publish_date) +
+          (r.fieldwork_start ? " · fieldwork " + escapeHtml(r.fieldwork_start) + " to " + escapeHtml(r.fieldwork_end) : "") +
+          (r.sample_size ? " · n=" + r.sample_size.toLocaleString() : "") +
+          " · " + covLabel + " · " + r.n_seats + " seats, " + r.n_rows + " rows loaded</div>" +
+          '<div>' + sourceLink(r.source_url, "source") +
+          (r.data_url ? "<br>" + sourceLink(r.data_url, "download data") : "") + "</div>" +
+          (r.methodology_notes ? '<div class="note text-muted">' + escapeHtml(r.methodology_notes) + "</div>" : "") +
+          "</div>";
+      });
+    }
+    html += "</section>";
+
+    html += '<p class="text-muted" style="font-size:0.78rem;">Full pipeline documentation, including bugs found and fixed along the way, lives in <code>docs/data_notes.md</code> and <code>docs/data_sources.md</code> in the repo.</p>';
+    html += "</div>";
+    return html;
   }
 
   function wireWardDetailToggles(wardRows) {
@@ -673,6 +764,156 @@
       var left = evt.clientX - wrapRect.left + 12;
       var top = evt.clientY - wrapRect.top - 10;
       if (left + 140 > wrapRect.width) left = evt.clientX - wrapRect.left - 150;
+      tooltip.style.left = left + "px";
+      tooltip.style.top = top + "px";
+    });
+    svg.addEventListener("mouseleave", function () {
+      crosshair.setAttribute("visibility", "hidden");
+      tooltip.style.visibility = "hidden";
+    });
+  }
+
+  function mountMrpChart(ge2024Rows, mrpRows) {
+    var container = document.getElementById("mrp-chart");
+    if (!container) return;
+
+    var points = []; // {t, party, share, kind:'actual'|'projected', label}
+    if (ge2024Rows && ge2024Rows.length) {
+      var gIdx = colIndex(COLS.ge2024);
+      ge2024Rows.forEach(function (r) {
+        points.push({
+          t: Date.parse("2024-07-04T00:00:00Z"), party: r[gIdx.party], share: r[gIdx.vote_share_pct],
+          kind: "actual", label: "Actual result — GE2024 (4 Jul 2024)",
+        });
+      });
+    }
+    if (mrpRows && mrpRows.length) {
+      var mIdx = colIndex(COLS.mrp);
+      mrpRows.forEach(function (r) {
+        points.push({
+          t: Date.parse(r[mIdx.publish_date] + "T00:00:00Z"), party: r[mIdx.party], share: r[mIdx.vote_share_pct],
+          kind: "projected", label: r[mIdx.pollster] + " MRP (" + r[mIdx.publish_date] + ")",
+        });
+      });
+    }
+    if (points.length < 2) {
+      container.innerHTML = '<p class="placeholder" style="padding:0.5rem 0;">Only one data point so far — need at least one MRP release plus GE2024, or two MRP releases, to chart a trend.</p>';
+      return;
+    }
+
+    var times = points.map(function (p) { return p.t; });
+    var t0 = Math.min.apply(null, times), t1 = Math.max.apply(null, times);
+    var span = Math.max(t1 - t0, 1);
+    var parties = [];
+    points.forEach(function (p) { if (parties.indexOf(p.party) === -1) parties.push(p.party); });
+    parties.sort(function (a, b) {
+      var maxA = Math.max.apply(null, points.filter(function (p) { return p.party === a; }).map(function (p) { return p.share || 0; }));
+      var maxB = Math.max.apply(null, points.filter(function (p) { return p.party === b; }).map(function (p) { return p.share || 0; }));
+      return maxB - maxA;
+    });
+    var maxShare = Math.max.apply(null, points.map(function (p) { return p.share || 0; }));
+    var yMax = niceCeil(maxShare * 1.15);
+
+    var W = 640, H = 220, ML = 32, MR = 12, MT = 12, MB = 22;
+    var plotW = W - ML - MR, plotH = H - MT - MB;
+    function xOf(t) { return ML + (t - t0) / span * plotW; }
+    function yOf(share) { return MT + plotH - (share / yMax) * plotH; }
+
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none" });
+    [0, yMax / 2, yMax].forEach(function (v) {
+      var y = yOf(v);
+      svg.appendChild(svgEl("line", { class: "chart-axis", x1: ML, x2: W - MR, y1: y, y2: y }));
+      var t = svgEl("text", { class: "chart-axis-label", x: 2, y: y + 3 });
+      t.textContent = Math.round(v) + "%";
+      svg.appendChild(t);
+    });
+    svg.appendChild(svgEl("line", { class: "chart-axis", x1: ML, x2: W - MR, y1: MT + plotH, y2: MT + plotH }));
+    var uniqueTimes = [];
+    points.forEach(function (p) { if (uniqueTimes.indexOf(p.t) === -1) uniqueTimes.push(p.t); });
+    uniqueTimes.sort(function (a, b) { return a - b; });
+    uniqueTimes.forEach(function (t, i) {
+      var x = xOf(t);
+      svg.appendChild(svgEl("line", { class: "chart-axis", x1: x, x2: x, y1: MT + plotH, y2: MT + plotH + 3 }));
+      var lbl = svgEl("text", {
+        class: "chart-axis-label", x: x, y: H - 4,
+        "text-anchor": i === 0 ? "start" : (i === uniqueTimes.length - 1 ? "end" : "middle"),
+      });
+      lbl.textContent = new Date(t).toISOString().slice(0, 10);
+      svg.appendChild(lbl);
+    });
+
+    parties.forEach(function (party) {
+      var color = partyColour(party);
+      var projected = points.filter(function (p) { return p.party === party && p.kind === "projected"; })
+        .sort(function (a, b) { return a.t - b.t; });
+      if (projected.length > 1) {
+        var d = projected.map(function (p, i) { return (i === 0 ? "M" : "L") + xOf(p.t) + "," + yOf(p.share); }).join(" ");
+        svg.appendChild(svgEl("path", { class: "chart-line", d: d, stroke: color, "stroke-dasharray": "4 3" }));
+      }
+      projected.forEach(function (p) {
+        svg.appendChild(svgEl("circle", { class: "chart-dot", cx: xOf(p.t), cy: yOf(p.share), r: 3.5, fill: color }));
+      });
+      points.filter(function (p) { return p.party === party && p.kind === "actual"; }).forEach(function (p) {
+        var s = 7;
+        svg.appendChild(svgEl("rect", {
+          x: xOf(p.t) - s / 2, y: yOf(p.share) - s / 2, width: s, height: s,
+          fill: color, stroke: "var(--surface-raised)", "stroke-width": 1,
+        }));
+      });
+    });
+
+    var crosshair = svgEl("line", { class: "chart-crosshair", x1: 0, x2: 0, y1: MT, y2: MT + plotH, visibility: "hidden" });
+    svg.appendChild(crosshair);
+
+    var tooltip = document.createElement("div");
+    tooltip.className = "chart-tooltip";
+    container.innerHTML = "";
+    container.appendChild(svg);
+    container.appendChild(tooltip);
+
+    var legend = document.createElement("div");
+    legend.className = "chart-legend";
+    parties.forEach(function (p) {
+      var item = document.createElement("span");
+      item.className = "party";
+      item.innerHTML = '<span class="swatch" style="background:' + partyColour(p) + '"></span>' + escapeHtml(p);
+      legend.appendChild(item);
+    });
+    container.appendChild(legend);
+
+    function nearestTimeIndex(mouseX) {
+      var best = 0, bestDist = Infinity;
+      uniqueTimes.forEach(function (t, i) {
+        var dist = Math.abs(xOf(t) - mouseX);
+        if (dist < bestDist) { bestDist = dist; best = i; }
+      });
+      return best;
+    }
+
+    svg.addEventListener("mousemove", function (evt) {
+      var pt = svg.createSVGPoint();
+      pt.x = evt.clientX; pt.y = evt.clientY;
+      var loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      var ti = nearestTimeIndex(loc.x);
+      var t = uniqueTimes[ti];
+      var x = xOf(t);
+      crosshair.setAttribute("x1", x); crosshair.setAttribute("x2", x);
+      crosshair.setAttribute("visibility", "visible");
+
+      var atTime = points.filter(function (p) { return p.t === t; }).sort(function (a, b) { return b.share - a.share; });
+      var sourceLabel = atTime.length ? atTime[0].label : "";
+      var html = '<div class="tt-date">' + escapeHtml(sourceLabel) + "</div>";
+      atTime.forEach(function (p) {
+        html += '<div class="tt-row"><span class="swatch" style="background:' + partyColour(p.party) + '"></span>' +
+          escapeHtml(p.party) + " " + fmtPct(p.share) + (p.kind === "actual" ? " (actual)" : "") + "</div>";
+      });
+      tooltip.innerHTML = html;
+      tooltip.style.visibility = "visible";
+
+      var wrapRect = container.getBoundingClientRect();
+      var left = evt.clientX - wrapRect.left + 12;
+      var top = evt.clientY - wrapRect.top - 10;
+      if (left + 160 > wrapRect.width) left = evt.clientX - wrapRect.left - 170;
       tooltip.style.left = left + "px";
       tooltip.style.top = top + "px";
     });

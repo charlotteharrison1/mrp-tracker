@@ -94,7 +94,9 @@ def main():
                                        publish_date, sample_size, source_url, data_url, methodology_notes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(pollster, publish_date, client) DO UPDATE SET
-               source_url=excluded.source_url, data_url=excluded.data_url""",
+               fieldwork_start=excluded.fieldwork_start, fieldwork_end=excluded.fieldwork_end,
+               sample_size=excluded.sample_size, source_url=excluded.source_url,
+               data_url=excluded.data_url, methodology_notes=excluded.methodology_notes""",
         (args.pollster, args.client, args.fieldwork_start, args.fieldwork_end,
          args.publish_date, args.sample_size, args.source_url, args.data_url, args.methodology_notes),
     )
