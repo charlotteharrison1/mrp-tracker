@@ -137,6 +137,20 @@ is for whichever session (or agent) picks this project up next.
   columns not in the fixed map" list before trusting an ingest** — if
   something on it isn't obviously a party name, stop and inspect the
   sheet directly (`openpyxl`, print the header row) before proceeding.
+- **More in Common's release files are wildly inconsistent in structure**
+  across just 6 releases: sheet names vary (`Results`, `Full results`,
+  `Seat summaries`), one release (Apr 2025) includes an explicit
+  `Constituency code` column (bonus — skips fuzzy matching entirely) while
+  the rest don't, value format varies (decimal fraction 0.07 in xlsx files
+  vs percentage string "7%" in at least one csv), and the July 2025 CSV is
+  **Mac Roman encoded**, not UTF-8 (byte `0x99` meant 'ô'; cp1252 would
+  have silently decoded it as '™' instead of raising an error — neither
+  single-byte codec reliably fails on a wrong guess, so this can't be
+  fully automatic; if a future release still looks garbled, check the raw
+  bytes directly rather than guessing another codec). `04_ingest_mrp_release.py`
+  computes rank from vote share itself, so a text `Winner`/`Change`/`GE_winner`
+  column is never used — just make sure it's excluded from the party-columns
+  scan (`NON_PARTY_COLS`), not treated as a fake party.
 - **LEAP CSV column order isn't stable across eras.** Modern exports
   (confirmed on Westminster 2022) are
   `council, ward, "", ward_code(GSS), candidate, party, votes, status` —
