@@ -125,6 +125,13 @@
   }
   #list button.item.selected .nation-tag { color: rgba(255,255,255,0.85); border-color: rgba(255,255,255,0.5); }
   #list .empty { padding: 1rem; color: var(--text-muted); font-size: 0.85rem; }
+  #detail-pane {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   main {
     flex: 1;
     min-width: 0;
@@ -132,6 +139,7 @@
     padding: clamp(1rem, 3vw, 2rem);
     overflow-y: auto;
   }
+  #mobile-back { display: none; }
   .placeholder { color: var(--text-muted); padding: 2rem 0; }
   .text-muted { color: var(--text-muted); }
   h1.pcon-name { margin: 0 0 0.2rem; font-size: 1.6rem; }
@@ -141,6 +149,7 @@
   h2.group-heading { font-size: 1.15rem; margin: 0 0 1rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
   section h3 { font-size: 0.95rem; margin: 0 0 0.6rem; color: var(--text-secondary); }
   table { border-collapse: collapse; width: 100%; }
+  .table-wrap { overflow-x: auto; }
   th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
   th { color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
   .party {
@@ -179,10 +188,9 @@
   .chart-actual-marker { stroke-width: 1.5; stroke: var(--surface-raised); cursor: pointer; }
   .chart-actual-marker:hover, .chart-actual-marker.active { stroke: var(--text-primary); }
   .chart-actual-line { stroke-width: 1.5; stroke-dasharray: 1 3; stroke-linecap: round; opacity: 0.45; pointer-events: none; }
-  .chart-local-line { fill: none; stroke-width: 1.3; opacity: 0.85; }
-  .chart-local-marker { fill: var(--surface-raised); stroke-width: 1.3; }
-  .chart-legend-councils { padding-top: 0; color: var(--text-secondary); }
-  .chart-legend-councils svg { vertical-align: middle; margin-right: 0.15rem; }
+  .chart-local-line { fill: none; stroke-width: 1.3; stroke-dasharray: 3 2; opacity: 0.85; }
+  .chart-local-marker { fill: var(--surface-raised); stroke-width: 1.3; cursor: pointer; }
+  .chart-local-marker:hover { fill: var(--text-primary); }
   .chart-election-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
   .chart-election-label { fill: var(--text-muted); font-size: 9px; }
   .chart-axis { stroke: var(--border); stroke-width: 1; }
@@ -199,6 +207,20 @@
   @media (max-width: 720px) {
     .layout { flex-direction: column; }
     #sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 45vh; }
+    /* Master-detail: on a phone-width screen there isn't room to show the
+       list and a selected constituency at once (the list used to just sit
+       above the detail view, forcing a scroll past it every time) — show
+       one or the other, switched by a .showing-detail class on .layout
+       toggled in selectConstituency()/showSources()/the back button. */
+    .layout:not(.showing-detail) #detail-pane { display: none; }
+    .layout.showing-detail #sidebar { display: none; }
+    .layout.showing-detail #mobile-back {
+      display: block; flex-shrink: 0; margin: 0.6rem 0.9rem 0; align-self: flex-start;
+      background: none; border: 1px solid var(--border); color: var(--text-secondary);
+      border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.85rem; cursor: pointer;
+    }
+    .marker-legend { flex-direction: column; gap: 0.5rem; }
+    table { min-width: 480px; }
   }
 </style>
 </head>
@@ -218,9 +240,12 @@
     </div>
     <div id="list"></div>
   </div>
-  <main id="detail">
-    <p class="placeholder">Select a constituency on the left, or search by name.</p>
-  </main>
+  <div id="detail-pane">
+    <button id="mobile-back" type="button">&larr; Back to list</button>
+    <main id="detail">
+      <p class="placeholder">Select a constituency on the left, or search by name.</p>
+    </main>
+  </div>
 </div>
 
 <script>
@@ -345,6 +370,13 @@
 
     els.sourcesToggle.addEventListener("click", function () { showSources(); });
 
+    // Mobile master-detail: goes back to the list without touching the
+    // hash, so re-opening the same constituency (or the browser's own
+    // back button, which still works via hashchange) both keep working.
+    document.getElementById("mobile-back").addEventListener("click", function () {
+      document.querySelector(".layout").classList.remove("showing-detail");
+    });
+
     window.addEventListener("hashchange", applyHash);
     applyHash();
   }
@@ -360,6 +392,7 @@
     renderList();
     els.detail.innerHTML = renderSourcesPage();
     els.detail.scrollTop = 0;
+    document.querySelector(".layout").classList.add("showing-detail");
     if (!fromHash) history.replaceState(null, "", "#sources");
   }
 
@@ -394,6 +427,7 @@
     selectedCode = code;
     renderList();
     renderDetail(code);
+    document.querySelector(".layout").classList.add("showing-detail");
     if (!fromHash) {
       history.replaceState(null, "", "#" + encodeURIComponent(code));
     }
@@ -443,12 +477,12 @@
       body += '<div class="stat">' + partyChip(r[idx.party]) + '<strong>' + fmtPct(r[idx.vote_share_pct]) + '</strong></div>';
     });
     body += "</div>";
-    body += "<table><thead><tr><th>Rank</th><th>Candidate</th><th>Party</th><th>Votes</th><th>Share</th></tr></thead><tbody>";
+    body += '<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Candidate</th><th>Party</th><th>Votes</th><th>Share</th></tr></thead><tbody>';
     sorted.forEach(function (r) {
       body += "<tr><td>" + r[idx.rank] + "</td><td>" + escapeHtml(r[idx.candidate_name]) + "</td><td>" + partyChip(r[idx.party]) +
         "</td><td>" + (r[idx.votes] == null ? "—" : r[idx.votes].toLocaleString()) + "</td><td>" + fmtPct(r[idx.vote_share_pct]) + "</td></tr>";
     });
-    body += "</tbody></table>";
+    body += "</tbody></table></div>";
     body += '<p>' + sourceLink(sorted[0][idx.source_url], "Official result — electionresults.parliament.uk") + "</p>";
     body += "</section>";
     return body;
@@ -470,7 +504,8 @@
       '<span class="mk"><svg width="10" height="10"><path d="M5,0 L10,5 L5,10 L0,5 Z" fill="currentColor"></path></svg> Actual result (GE2024) — click a diamond to compare it across the whole chart</span>' +
       '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection</span>';
     if (localRows && localRows.length) {
-      body += '<span class="mk"><svg width="10" height="10"><path d="M5,1 L9,9 L1,9 Z" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg> Local council results' +
+      body += '<span class="mk"><svg width="10" height="10"><path d="M5,1 L9,9 L1,9 Z" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg> ' +
+        'Local council results (averaged across councils where a seat spans more than one — click a triangle for the full breakdown)' +
         '<label class="local-toggle"><input type="checkbox" id="toggle-local-results"> show on chart</label></span>';
     }
     body += "</div>";
@@ -488,7 +523,7 @@
       if (!releases[key]) { releases[key] = []; order.push(key); }
       releases[key].push(r);
     });
-    body += "<table><thead><tr><th>Date</th><th>Pollster</th><th>Parties (vote share)</th><th>Source</th></tr></thead><tbody>";
+    body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Pollster</th><th>Parties (vote share)</th><th>Source</th></tr></thead><tbody>';
     order.forEach(function (key) {
       var group = releases[key].slice().sort(function (a, b) { return (a[idx.rank] || 99) - (b[idx.rank] || 99); });
       var first = group[0];
@@ -500,12 +535,12 @@
       body += "<tr><td>" + escapeHtml(first[idx.publish_date]) + "</td><td>" + escapeHtml(first[idx.pollster]) +
         "</td><td>" + spread + "</td><td class=\"source-col\">" + links + "</td></tr>";
     });
-    body += "</tbody></table></section>";
+    body += "</tbody></table></div></section>";
     return body;
   }
 
   function renderLocalByCouncil(councilRows, wardRows) {
-    var body = "<section><h3>Local election results by council</h3>";
+    var body = '<section id="local-by-council"><h3>Local election results by council</h3>';
     if (!councilRows.length) {
       body += '<p class="placeholder">No local election data loaded yet for wards in this seat.</p></section>';
       return body;
@@ -533,7 +568,7 @@
       });
       body += '<div class="council-block"><h3>' + escapeHtml(la) + " — party vote share over time</h3>";
       body += '<div class="chart-wrap" data-chart-la="' + escapeHtml(la) + '"></div>';
-      body += "<table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th># wards</th><th>Source</th></tr></thead><tbody>";
+      body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th># wards</th><th>Source</th></tr></thead><tbody>';
       rows.forEach(function (r) {
         var links = sourceLink(r[idx.source_url], "source") +
           (r[idx.data_url] ? "<br>" + sourceLink(r[idx.data_url], "csv") : "");
@@ -541,7 +576,7 @@
           "</td><td>" + fmtPct(r[idx.avg_vote_share_pct]) + "</td><td>" + r[idx.n_wards] +
           "</td><td class=\"source-col\">" + links + "</td></tr>";
       });
-      body += "</tbody></table>";
+      body += "</tbody></table></div>";
 
       var wardsForCouncil = (wardRows || []).filter(function (w) { return w[wardIdx.la_name] === la; });
       if (wardsForCouncil.length) {
@@ -623,14 +658,14 @@
             if (a[wardIdx.election_date] !== b[wardIdx.election_date]) return a[wardIdx.election_date] < b[wardIdx.election_date] ? 1 : -1;
             return (b[wardIdx.votes] || 0) - (a[wardIdx.votes] || 0);
           });
-        var html = "<table><thead><tr><th>Ward</th><th>Date</th><th>Candidate</th><th>Party</th><th>Votes</th><th>Share</th><th>Elected</th></tr></thead><tbody>";
+        var html = '<div class="table-wrap"><table><thead><tr><th>Ward</th><th>Date</th><th>Candidate</th><th>Party</th><th>Votes</th><th>Share</th><th>Elected</th></tr></thead><tbody>';
         rows.forEach(function (w) {
           html += "<tr><td>" + escapeHtml(w[wardIdx.ward_name]) + "</td><td>" + fmtDate(w[wardIdx.election_date]) +
             "</td><td>" + escapeHtml(w[wardIdx.candidate_name]) + "</td><td>" + partyChip(w[wardIdx.party]) +
             "</td><td>" + (w[wardIdx.votes] == null ? "—" : w[wardIdx.votes].toLocaleString()) +
             "</td><td>" + fmtPct(w[wardIdx.vote_share_pct]) + "</td><td>" + (w[wardIdx.elected] ? "✓" : "") + "</td></tr>";
         });
-        html += "</tbody></table>";
+        html += "</tbody></table></div>";
         det.querySelector(".ward-detail-body").innerHTML = html;
       });
     });
@@ -852,13 +887,32 @@
       });
     }
     if (showLocal && localRows && localRows.length) {
+      // Average across councils sharing a date, so a multi-council seat
+      // (e.g. Gorton and Denton spanning Manchester/Tameside) gets ONE
+      // point per party per date here rather than one per council - the
+      // per-council breakdown belongs in (and is only available in) the
+      // "Local election results by council" table below, which a click
+      // on the resulting marker scrolls to. Un-weighted mean across
+      // councils, since we don't have a total-electors-per-council figure
+      // to weight by.
       var lIdx = colIndex(COLS.local_council);
+      var localByPartyDate = {}; // "party|t" -> { party, t, shares: [], las: [] }
       localRows.forEach(function (r) {
-        var la = r[lIdx.la_name];
+        var t = Date.parse(r[lIdx.election_date] + "T00:00:00Z");
+        var key = r[lIdx.party] + "|" + t;
+        if (!localByPartyDate[key]) {
+          localByPartyDate[key] = { party: r[lIdx.party], t: t, date: r[lIdx.election_date], shares: [], las: [] };
+        }
+        localByPartyDate[key].shares.push(r[lIdx.avg_vote_share_pct]);
+        localByPartyDate[key].las.push(r[lIdx.la_name]);
+      });
+      Object.keys(localByPartyDate).forEach(function (key) {
+        var g = localByPartyDate[key];
+        var avg = g.shares.reduce(function (a, b) { return a + b; }, 0) / g.shares.length;
+        var uniqueLas = g.las.filter(function (la, i) { return g.las.indexOf(la) === i; });
         points.push({
-          t: Date.parse(r[lIdx.election_date] + "T00:00:00Z"), party: r[lIdx.party], share: r[lIdx.avg_vote_share_pct],
-          kind: "local", group: r[lIdx.party] + "|" + la,
-          label: la + " local election (" + r[lIdx.election_date] + ")",
+          t: g.t, party: g.party, share: avg, kind: "local", group: g.party,
+          label: (uniqueLas.length > 1 ? uniqueLas.join(" + ") + " (avg)" : uniqueLas[0]) + " local election (" + g.date + ")",
         });
       });
     }
@@ -914,15 +968,6 @@
       svg.appendChild(geLabel);
     }
 
-    // Local-council groups get a dash pattern keyed by council (la_name),
-    // consistent across parties, so a two-council seat (e.g. Gorton and
-    // Denton spanning Manchester/Tameside) reads as "two distinct councils"
-    // rather than as noise — party still carries the color.
-    var localLaNames = [];
-    points.forEach(function (p) { if (p.kind === "local" && localLaNames.indexOf(p.group.split("|")[1]) === -1) localLaNames.push(p.group.split("|")[1]); });
-    var DASH_PATTERNS = ["3 2", "1 2", "5 2 1 2", "2 2 6 2"];
-    function dashFor(la) { return DASH_PATTERNS[localLaNames.indexOf(la) % DASH_PATTERNS.length]; }
-
     var actualLineByParty = {};
     parties.forEach(function (party) {
       var color = partyColour(party);
@@ -965,27 +1010,26 @@
 
       // Local council results: thin dashed line (dash pattern keyed by
       // council) + hollow triangle markers, kept visually distinct from
-      // the solid MRP line and the diamond GE2024 marker.
-      var localGroups = {};
-      var localGroupOrder = [];
-      points.filter(function (p) { return p.party === party && p.kind === "local"; }).forEach(function (p) {
-        if (!localGroups[p.group]) { localGroups[p.group] = []; localGroupOrder.push(p.group); }
-        localGroups[p.group].push(p);
-      });
-      localGroupOrder.forEach(function (group) {
-        var la = group.split("|")[1];
-        var pts = localGroups[group].sort(function (a, b) { return a.t - b.t; });
-        if (pts.length > 1) {
-          var ld = pts.map(function (p, i) { return (i === 0 ? "M" : "L") + xOf(p.t) + "," + yOf(p.share); }).join(" ");
-          svg.appendChild(svgEl("path", {
-            class: "chart-local-line", d: ld, stroke: color, "stroke-dasharray": dashFor(la),
-          }));
-        }
-        pts.forEach(function (p) {
-          var x = xOf(p.t), y = yOf(p.share), s = 4.5;
-          var td = "M" + x + "," + (y - s) + " L" + (x + s) + "," + (y + s) + " L" + (x - s) + "," + (y + s) + " Z";
-          svg.appendChild(svgEl("path", { class: "chart-local-marker", d: td, stroke: color }));
+      // the solid MRP line and the diamond GE2024 marker. Points are
+      // already averaged across any councils sharing a date (see where
+      // `points` is built above), so there's exactly one local line per
+      // party here — the per-council breakdown lives only in the table
+      // below, which clicking a marker scrolls to.
+      var localPts = points.filter(function (p) { return p.party === party && p.kind === "local"; })
+        .sort(function (a, b) { return a.t - b.t; });
+      if (localPts.length > 1) {
+        var ld = localPts.map(function (p, i) { return (i === 0 ? "M" : "L") + xOf(p.t) + "," + yOf(p.share); }).join(" ");
+        svg.appendChild(svgEl("path", { class: "chart-local-line", d: ld, stroke: color }));
+      }
+      localPts.forEach(function (p) {
+        var x = xOf(p.t), y = yOf(p.share), s = 4.5;
+        var td = "M" + x + "," + (y - s) + " L" + (x + s) + "," + (y + s) + " L" + (x - s) + "," + (y + s) + " Z";
+        var marker = svgEl("path", { class: "chart-local-marker", d: td, stroke: color });
+        marker.addEventListener("click", function () {
+          var target = document.getElementById("local-by-council");
+          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
         });
+        svg.appendChild(marker);
       });
     });
 
@@ -1007,19 +1051,6 @@
       legend.appendChild(item);
     });
     container.appendChild(legend);
-
-    if (localLaNames.length > 1) {
-      var councilLegend = document.createElement("div");
-      councilLegend.className = "chart-legend chart-legend-councils";
-      localLaNames.forEach(function (la) {
-        var item = document.createElement("span");
-        item.className = "party";
-        item.innerHTML = '<svg width="20" height="8"><line x1="0" y1="4" x2="20" y2="4" stroke="currentColor" stroke-width="1.5" stroke-dasharray="' +
-          dashFor(la) + '"></line></svg> ' + escapeHtml(la);
-        councilLegend.appendChild(item);
-      });
-      container.appendChild(councilLegend);
-    }
 
     function nearestTimeIndex(mouseX) {
       var best = 0, bestDist = Infinity;
@@ -1044,7 +1075,7 @@
       var sourceLabel = atTime.length ? atTime[0].label : "";
       var html = '<div class="tt-date">' + escapeHtml(sourceLabel) + "</div>";
       atTime.forEach(function (p) {
-        var suffix = p.kind === "actual" ? " (actual)" : (p.kind === "local" ? " (local, " + escapeHtml(p.group.split("|")[1]) + ")" : "");
+        var suffix = p.kind === "actual" ? " (actual)" : (p.kind === "local" ? " (local)" : "");
         html += '<div class="tt-row"><span class="swatch" style="background:' + partyColour(p.party) + '"></span>' +
           escapeHtml(p.party) + " " + fmtPct(p.share) + suffix + "</div>";
       });

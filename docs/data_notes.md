@@ -530,3 +530,32 @@ is for whichever session (or agent) picks this project up next.
   more specific, correct signal was found (the by-election caption text),
   it was worth going back and checking whether the earlier, blunter fix
   had thrown away anything it didn't need to.
+- **2026-09-22 — split wards now count in EVERY constituency they touch,
+  not just one.** User's response to the audit: "keep it in both" (they
+  didn't want the full population-weighted geometric fix, just for a
+  split ward's data to stop being silently dropped from one side).
+  Populated `ward_constituency_overlap` (790 rows, 388 real splits — 2 of
+  the 390 ONS-flagged wards turned out to have only 1 distinct
+  `PCON24CD` in practice, skipped) with an equal 1/n weight per
+  constituency, since there's no population data to weight it precisely.
+  `07_export_navigator_data.py` got a new `build_ward_pcon_map()` shared
+  by `fetch_local_council()` and `fetch_local_wards()`: it reads
+  `ward_constituency_overlap` first, falling back to `wards.pcon_code`
+  (weight 1.0) for the ~8,000 wards that aren't split. Both functions
+  used to join through `wards w ON w.ward_code = ...`, which can only
+  ever produce ONE pcon per ward by construction (`wards`' primary key is
+  `(ward_code, boundary_year)`) — rewritten to do the pcon expansion in
+  Python instead of SQL, once per ward, over however many constituencies
+  `ward_pcon_map` returns for it. Verified: a genuinely split ward
+  (Liverpool Walton / Sefton Central, `E05000946`) now shows the
+  identical 15 candidate rows on both constituencies' pages, and the
+  full-dataset "does everything still sum to 100%" sweep still shows the
+  same 30 known exceptions, no new ones — the split-ward fix only
+  affects WHICH constituencies see a ward, not the per-constituency
+  arithmetic. The two older CLI tools (05/06) were deliberately NOT
+  updated — see the caveats added to their docstrings.
+  **`wards` table itself still isn't fixed** — it's still one row, one
+  pcon_code, per ward; only the navigator's export layer knows about
+  splits now. Fixing `wards` itself (adding pcon_code to its primary key)
+  would ripple into every other join in the codebase and wasn't what was
+  asked for here.

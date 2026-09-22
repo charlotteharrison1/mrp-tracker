@@ -55,20 +55,27 @@ county councils not present in `wards.la_name`, which only has districts).
   discussed with the user, not executed. Nothing in `index.html`
   currently references these tables, so their absence isn't visibly
   broken anywhere — it's a missing feature, not a bug.
-- `ward_constituency_overlap` — empty. Confirmed via a live query against
-  the source ArcGIS layer (2026-09-22): 390 of 8,396 wards (4.6%) carry
-  ONS's own `SPLIT_WARD` flag, meaning they're genuinely split across 2
-  (occasionally 3) constituencies, but `01_fetch_ons_lookup.py` assigns
-  each to only ONE constituency (last-write-wins during load) since the
-  `wards` table's primary key is `(ward_code, boundary_year)` — one row
-  per ward, full stop, not one row per (ward, constituency) pair. A real
-  fix needs a schema change (dropping that assumption everywhere it's
-  joined on) plus the population-weighted geometric overlay described in
-  `docs/senedd_crosswalk.md`, applied here instead of to the Senedd
-  problem — deferred as out of scope for a data-accuracy pass, not
-  attempted. Practical effect: a constituency containing one of these 390
-  wards may be silently missing that ward's local election results
-  entirely (if the *other* constituency won the last-write-wins
-  assignment), or crediting itself with results that only partly belong
-  to it. Surfaced to site visitors in the Sources page note on the Phase
-  1 ward lookup entry, not just here.
+- `ward_constituency_overlap` — **populated 2026-09-22** (790 rows, 388
+  wards) from a live query against the source ArcGIS layer's `SPLIT_WARD`
+  flag: 390 of 8,396 wards (4.6%) are genuinely split across 2
+  (occasionally 3 or 4) constituencies; 2 of those 390 turned out
+  degenerate (flagged split but only 1 distinct `PCON24CD` in practice)
+  and were skipped. `01_fetch_ons_lookup.py`'s `wards` table still only
+  assigns each ward to ONE constituency (its primary key is `(ward_code,
+  boundary_year)` — one row per ward, not one row per (ward,
+  constituency) pair; changing that is a bigger schema change than this
+  fix needed), but `07_export_navigator_data.py`'s `build_ward_pcon_map()`
+  now reads `ward_constituency_overlap` first and falls back to
+  `wards.pcon_code` only for the ~8,000 non-split wards — so every
+  constituency a split ward touches gets that ward's local election
+  results in the navigator now, not just whichever one
+  `01_fetch_ons_lookup.py` happened to load last. Each split ward is
+  weighted an equal 1/n toward each constituency's own average (no
+  population data available to weight it precisely by how many electors
+  actually live on each side of the boundary) — a deliberate
+  approximation, not the full population-weighted geometric overlay
+  described in `docs/senedd_crosswalk.md`, which is still not attempted.
+  The two older CLI tools (`05_compare_mrp_vs_actuals.py`,
+  `06_constituency_dashboard.py`) were NOT updated with this fix — they
+  still silently use `wards.pcon_code`'s single assignment, per their
+  existing "superseded by the navigator" caveat.

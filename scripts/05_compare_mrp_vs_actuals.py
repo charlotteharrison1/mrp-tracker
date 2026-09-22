@@ -45,8 +45,14 @@ def get_local_leaning(con, pcon_code):
     AVG only counts wards a party actually contested, so — same as the bug
     documented in docs/data_notes.md 2026-09-22 — a party that skipped its
     weakest ward will read as stronger here than it really is across the
-    whole constituency. This CLI tool is superseded by the navigator; not
-    worth the same zero-fill rewrite unless it's needed again."""
+    whole constituency. Also unlike the navigator (as of 2026-09-22), this
+    still joins through wards.pcon_code's single assignment, so a
+    constituency on the "losing" side of a split ward gets nothing from
+    it at all, while the "winning" side now applies a real 1/n weight
+    (ward_constituency_overlap is populated now) without the
+    corresponding zero-fill fix — a worse look than before for split
+    wards specifically, not better. This CLI tool is superseded by the
+    navigator; not worth the same rewrite unless it's needed again."""
     return con.execute(
         """
         SELECT le.election_date, v.party, AVG(v.ward_vote_share_pct * COALESCE(o.weight, 1.0)) AS weighted_share

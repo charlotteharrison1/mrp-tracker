@@ -68,7 +68,30 @@ def fetch_mrp(con):
     return by_pcon
 
 
-def fetch_local_council(con):
+def build_ward_pcon_map(con):
+    """ward_code -> [(pcon_code, weight), ...]. For the 388 wards genuinely
+    split across >1 constituency (per ward_constituency_overlap — see
+    docs/data_notes.md), this returns EVERY constituency the ward
+    overlaps, each with an equal 1/n weight (no population data to weight
+    by properly, so this is a deliberately simple approximation, not a
+    precise split) — the ward's results now appear on every constituency
+    it touches, rather than the previous single last-write-wins
+    assignment that silently omitted it from all but one. Every other
+    ward falls back to its single `wards.pcon_code` at weight 1.0."""
+    m = defaultdict(list)
+    overlap_wards = set()
+    for ward_code, pcon_code, weight in con.execute(
+        "SELECT ward_code, pcon_code, weight FROM ward_constituency_overlap"
+    ):
+        m[ward_code].append((pcon_code, weight))
+        overlap_wards.add(ward_code)
+    for ward_code, pcon_code in con.execute("SELECT ward_code, pcon_code FROM wards"):
+        if ward_code not in overlap_wards:
+            m[ward_code].append((pcon_code, 1.0))
+    return m
+
+
+def fetch_local_council(con, ward_pcon_map):
     """Council-level party share per constituency, for one (pcon, council,
     election date): a weighted average, across EVERY ward this constituency
     has in that council for that date, of local_election_ward_party_avg's
@@ -84,29 +107,26 @@ def fetch_local_council(con):
     one council/date's party shares now sum to (very close to) 100%, as an
     actual result should — see docs/data_notes.md, the "why don't these
     add up to 100%" investigation."""
+    la_name_by_ward = dict(con.execute("SELECT ward_code, la_name FROM wards"))
     ward_rows = con.execute(
         """
-        SELECT w.pcon_code, w.la_name, le.election_date, v.ward_code, v.party,
-               v.ward_vote_share_pct AS share,
-               COALESCE(o.weight, 1.0) AS weight,
+        SELECT le.election_date, v.ward_code, v.party, v.ward_vote_share_pct AS share,
                le.page_url, le.source_url
         FROM local_election_ward_party_avg v
         JOIN local_election_events le ON le.election_id = v.election_id
-        -- ward_code only, not boundary_year — see docs/data_notes.md 2026-09-22
-        JOIN wards w ON w.ward_code = v.ward_code
-        LEFT JOIN ward_constituency_overlap o
-               ON o.ward_code = v.ward_code AND o.boundary_year = w.boundary_year AND o.pcon_code = w.pcon_code
         """
     ).fetchall()
 
     ward_universe = defaultdict(dict)              # (pcon, la, date) -> {ward_code: weight}
     party_ward_share = defaultdict(lambda: defaultdict(dict))  # (pcon, la, date) -> party -> {ward_code: share}
     meta = {}                                       # (pcon, la, date) -> (page_url, source_url)
-    for pcon, la_name, date, ward_code, party, share, weight, page_url, source_url in ward_rows:
-        key = (pcon, la_name, date)
-        ward_universe[key][ward_code] = weight
-        party_ward_share[key][party][ward_code] = share
-        meta[key] = (page_url, source_url)
+    for date, ward_code, party, share, page_url, source_url in ward_rows:
+        la_name = la_name_by_ward.get(ward_code)
+        for pcon, weight in ward_pcon_map.get(ward_code, []):
+            key = (pcon, la_name, date)
+            ward_universe[key][ward_code] = weight
+            party_ward_share[key][party][ward_code] = share
+            meta[key] = (page_url, source_url)
 
     by_pcon = defaultdict(list)
     for key in sorted(ward_universe, key=lambda k: (k[0], k[1], k[2]), reverse=True):
@@ -124,23 +144,37 @@ def fetch_local_council(con):
     return by_pcon
 
 
-def fetch_local_wards(con):
+def fetch_local_wards(con, ward_pcon_map):
     """Raw candidate-level rows, for the navigator's optional ward-level
     drill-down. Only rows with a matched ward_code can be placed in a
-    constituency — see docs/data_sources.md for the ~6% that can't yet."""
+    constituency — see docs/data_sources.md for the ~6% that can't yet.
+    A ward split across >1 constituency (ward_pcon_map) appears identically
+    under each — the raw candidate/vote data doesn't change per
+    constituency, only how much it should count toward each one's
+    AVERAGE does (handled separately in fetch_local_council)."""
+    la_name_by_ward = dict(con.execute("SELECT ward_code, la_name FROM wards"))
     by_pcon = defaultdict(list)
-    for pcon, la_name, ward_name, ward_code, date, party, candidate, votes, share, elected in con.execute(
+    rows = con.execute(
         """
-        SELECT w.pcon_code, w.la_name, r.ward_name_raw, r.ward_code, le.election_date,
+        SELECT r.ward_name_raw, r.ward_code, le.election_date,
                r.party, r.candidate_name, r.votes, r.vote_share_pct, r.elected
         FROM local_election_ward_results r
         JOIN local_election_events le ON le.election_id = r.election_id
-        -- ward_code only, not boundary_year — see docs/data_notes.md 2026-09-22
-        JOIN wards w ON w.ward_code = r.ward_code
-        ORDER BY w.pcon_code, w.la_name, r.ward_name_raw, le.election_date DESC, r.votes DESC
+        WHERE r.ward_code IS NOT NULL
+        ORDER BY r.ward_name_raw, le.election_date DESC, r.votes DESC
         """
-    ):
-        by_pcon[pcon].append([la_name, ward_name, ward_code, date, party, candidate, votes, share, bool(elected)])
+    ).fetchall()
+    for ward_name, ward_code, date, party, candidate, votes, share, elected in rows:
+        la_name = la_name_by_ward.get(ward_code)
+        for pcon, _weight in ward_pcon_map.get(ward_code, []):
+            by_pcon[pcon].append([la_name, ward_name, ward_code, date, party, candidate, votes, share, bool(elected)])
+    # Stable multi-pass sort (Python's sort is stable) to get the same
+    # ordering as the original SQL: la_name, ward_name asc; date, votes desc.
+    for pcon in by_pcon:
+        rows = by_pcon[pcon]
+        rows.sort(key=lambda r: r[6] or 0, reverse=True)   # votes desc
+        rows.sort(key=lambda r: r[3], reverse=True)        # date desc
+        rows.sort(key=lambda r: (r[0] or "", r[1]))         # la_name, ward_name asc
     return by_pcon
 
 
@@ -150,14 +184,16 @@ STATIC_SOURCES = [
         "source_name": "ONS Open Geography Portal (ArcGIS FeatureServer)",
         "source_url": "https://geoportal.statistics.gov.uk/datasets/ons::ward-to-westminster-parliamentary-constituency-to-lad-to-utla-july-2024-lookup-in-uk/about",
         "script": "01_fetch_ons_lookup.py",
-        "note": "650 constituencies, 8,396 wards. Known limitation: 390 wards nationally "
-                "(4.6%) are flagged by ONS as split across 2+ constituencies; this project "
-                "assigns each to a single constituency rather than proportionally splitting "
-                "it, so a constituency containing one of these wards may be missing that "
-                "ward's local election results entirely, or crediting itself with results "
-                "that partly belong to a neighbouring seat. A proper fix needs population-"
-                "weighted boundary geometry (see docs/senedd_crosswalk.md for the same "
-                "technique applied to a different problem), not attempted here.",
+        "note": "650 constituencies, 8,396 wards. Known limitation: 388 wards nationally "
+                "(4.6%) are flagged by ONS as split across 2+ constituencies. Every "
+                "constituency a split ward touches now gets that ward's local election "
+                "results in full (not silently omitted, as an earlier version of this "
+                "project did) — but each is weighted only an equal 1/n share toward that "
+                "constituency's own average, since we don't have the population data to "
+                "split it properly by how many of the ward's electors actually live on "
+                "each side. A precise fix needs population-weighted boundary geometry (see "
+                "docs/senedd_crosswalk.md for the same technique applied to a different "
+                "problem) — not attempted, this is a deliberate approximation.",
     },
     {
         "phase": 1, "dataset": "LEAP council/year index",
@@ -209,8 +245,9 @@ def main():
     constituencies = fetch_constituencies(con)
     ge2024 = fetch_ge2024(con)
     mrp = fetch_mrp(con)
-    local_council = fetch_local_council(con)
-    local_wards = fetch_local_wards(con)
+    ward_pcon_map = build_ward_pcon_map(con)
+    local_council = fetch_local_council(con, ward_pcon_map)
+    local_wards = fetch_local_wards(con, ward_pcon_map)
     mrp_releases_meta = fetch_mrp_releases_meta(con)
 
     pcons = [c["code"] for c in constituencies]

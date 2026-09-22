@@ -55,10 +55,13 @@ def render_mrp_trend(con, pcon_code):
 
 
 def render_local_by_council(con, pcon_code):
-    # NOTE: AVGs only over wards a party contested, same caveat as
+    # NOTE: AVGs only over wards a party contested, and joins through
+    # wards.pcon_code's single assignment (so a split ward only ever
+    # shows up on one side, with a real-but-unnormalised weight now that
+    # ward_constituency_overlap is populated) — same caveats as
     # 05_compare_mrp_vs_actuals.py's get_local_leaning() — see
     # docs/data_notes.md 2026-09-22. Superseded by the navigator, which
-    # does the full zero-fill-across-all-wards version of this.
+    # does the full zero-fill + both-sides-of-a-split-ward version of this.
     rows = con.execute(
         """
         SELECT w.la_name, le.election_date, v.party,
