@@ -182,19 +182,27 @@
   a.source-link:hover { color: var(--accent); border-color: var(--accent); }
   th.source-col, td.source-col { width: 1%; }
   .chart-wrap { position: relative; padding: 0.8rem 0.8rem 0; background: var(--surface-raised); }
-  .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
-  .chart-line { fill: none; stroke-width: 2; }
-  .chart-dot { stroke-width: 1.5; stroke: var(--surface-raised); }
+  .chart-zoom-bg { fill: transparent; cursor: crosshair; }
+  .chart-zoom-select { fill: var(--accent); opacity: 0.15; pointer-events: none; }
+  .chart-zoom-reset {
+    position: absolute; top: 0.5rem; right: 0.5rem; z-index: 2;
+    background: var(--surface); border: 1px solid var(--border); color: var(--text-secondary);
+    border-radius: 6px; padding: 0.2rem 0.55rem; font-size: 0.72rem; cursor: pointer;
+  }
+  .chart-zoom-reset:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+  .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; user-select: none; }
+  .chart-line { fill: none; stroke-width: 2; pointer-events: none; }
+  .chart-dot { stroke-width: 1.5; stroke: var(--surface-raised); pointer-events: none; }
   .chart-actual-marker { stroke-width: 1.5; stroke: var(--surface-raised); cursor: pointer; }
   .chart-actual-marker:hover, .chart-actual-marker.active { stroke: var(--text-primary); }
   .chart-actual-line { stroke-width: 1.5; stroke-dasharray: 1 3; stroke-linecap: round; opacity: 0.45; pointer-events: none; }
-  .chart-local-line { fill: none; stroke-width: 1.3; stroke-dasharray: 3 2; opacity: 0.85; }
+  .chart-local-line { fill: none; stroke-width: 1.3; stroke-dasharray: 3 2; opacity: 0.85; pointer-events: none; }
   .chart-local-marker { fill: var(--surface-raised); stroke-width: 1.3; cursor: pointer; }
   .chart-local-marker:hover { fill: var(--text-primary); }
-  .chart-election-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
-  .chart-election-label { fill: var(--text-muted); font-size: 9px; }
-  .chart-axis { stroke: var(--border); stroke-width: 1; }
-  .chart-axis-label { fill: var(--text-muted); font-size: 9px; }
+  .chart-election-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+  .chart-election-label { fill: var(--text-muted); font-size: 9px; pointer-events: none; }
+  .chart-axis { stroke: var(--border); stroke-width: 1; pointer-events: none; }
+  .chart-axis-label { fill: var(--text-muted); font-size: 9px; pointer-events: none; user-select: none; }
   .chart-crosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 2; pointer-events: none; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: 0.15rem 0.9rem; padding: 0.5rem 0.8rem 0.7rem; font-size: 0.76rem; }
   .chart-tooltip {
@@ -568,12 +576,13 @@
       });
       body += '<div class="council-block"><h3>' + escapeHtml(la) + " — party vote share over time</h3>";
       body += '<div class="chart-wrap" data-chart-la="' + escapeHtml(la) + '"></div>';
-      body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th># wards</th><th>Source</th></tr></thead><tbody>';
+      body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th>Wards contested</th><th>Seats won</th><th>Source</th></tr></thead><tbody>';
       rows.forEach(function (r) {
         var links = sourceLink(r[idx.source_url], "source") +
           (r[idx.data_url] ? "<br>" + sourceLink(r[idx.data_url], "csv") : "");
         body += "<tr><td>" + fmtDate(r[idx.election_date]) + "</td><td>" + partyChip(r[idx.party]) +
           "</td><td>" + fmtPct(r[idx.avg_vote_share_pct]) + "</td><td>" + r[idx.n_wards] +
+          "</td><td>" + r[idx.seats_won] +
           "</td><td class=\"source-col\">" + links + "</td></tr>";
       });
       body += "</tbody></table></div>";
@@ -677,6 +686,81 @@
     for (var k in attrs) el.setAttribute(k, attrs[k]);
     return el;
   }
+  // Drag-to-zoom for a time-series chart: click-drag horizontally over
+  // the plot area to select a time range, calling onZoom(t0, t1) with
+  // it; double-click to reset (onReset()). Shared by mountMrpChart and
+  // buildTrendChart, which both use the same {ML, plotW, plotH, t0,
+  // span} pixel<->time mapping. A transparent rect is inserted BEHIND
+  // whatever's already in the SVG (data lines/dots/markers), so a click
+  // that lands exactly on a marker still reaches that marker's own
+  // handler (e.g. the GE2024/local-result click-to-compare toggles)
+  // instead of starting a drag - only empty background starts one.
+  // Listens on `window` (not just the SVG) so a drag still tracks if the
+  // cursor leaves the chart mid-drag; `container._zoomCleanup` removes
+  // the PREVIOUS instance's window listeners first, since every zoom or
+  // reset fully rebuilds the chart (and its SVG) from scratch - without
+  // this, every re-render would leak another pair of window listeners.
+  function attachDragZoom(svg, container, bounds, onZoom, onReset) {
+    if (container._zoomCleanup) container._zoomCleanup();
+    var MIN_DRAG_PX = 6;
+    var dragging = false, startX = 0;
+
+    var bg = svgEl("rect", {
+      class: "chart-zoom-bg", x: bounds.ML, y: bounds.MT, width: bounds.plotW, height: bounds.plotH,
+    });
+    svg.insertBefore(bg, svg.firstChild);
+    var selRect = svgEl("rect", {
+      class: "chart-zoom-select", x: bounds.ML, y: bounds.MT, width: 0, height: bounds.plotH, visibility: "hidden",
+    });
+    svg.appendChild(selRect);
+
+    function svgX(evt) {
+      var pt = svg.createSVGPoint();
+      pt.x = evt.clientX; pt.y = evt.clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse()).x;
+    }
+    function onMouseDown(evt) {
+      dragging = true;
+      startX = svgX(evt);
+      selRect.setAttribute("x", startX);
+      selRect.setAttribute("width", 0);
+      selRect.setAttribute("visibility", "visible");
+      evt.preventDefault();
+    }
+    function onMouseMove(evt) {
+      if (!dragging) return;
+      var x = svgX(evt);
+      var left = Math.max(bounds.ML, Math.min(startX, x, bounds.ML + bounds.plotW));
+      var right = Math.max(bounds.ML, Math.min(Math.max(startX, x), bounds.ML + bounds.plotW));
+      selRect.setAttribute("x", left);
+      selRect.setAttribute("width", right - left);
+    }
+    function onMouseUp(evt) {
+      if (!dragging) return;
+      dragging = false;
+      selRect.setAttribute("visibility", "hidden");
+      var x = svgX(evt);
+      if (Math.abs(x - startX) < MIN_DRAG_PX) return; // a click, not a drag - leave it to markers/crosshair
+      var xLeft = Math.max(bounds.ML, Math.min(startX, x, bounds.ML + bounds.plotW));
+      var xRight = Math.min(bounds.ML + bounds.plotW, Math.max(startX, x));
+      onZoom(bounds.t0 + (xLeft - bounds.ML) / bounds.plotW * bounds.span,
+             bounds.t0 + (xRight - bounds.ML) / bounds.plotW * bounds.span);
+    }
+    bg.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    svg.addEventListener("dblclick", onReset);
+    container._zoomCleanup = function () {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }
+  function zoomResetButton(container, onReset) {
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.className = "chart-zoom-reset"; btn.textContent = "Reset zoom";
+    btn.addEventListener("click", onReset);
+    container.appendChild(btn);
+  }
   // Draws x-axis tick marks + labels, skipping a label's TEXT (keeping the
   // tick) when it would visually overlap the last label actually drawn —
   // dates that cluster closely (e.g. two MRP releases 3 months apart on a
@@ -729,14 +813,23 @@
     });
   }
 
-  function buildTrendChart(container, rows, idx) {
-    var dates = [];
-    rows.forEach(function (r) { if (dates.indexOf(r[idx.election_date]) === -1) dates.push(r[idx.election_date]); });
-    dates.sort();
-    if (dates.length < 2) {
+  function buildTrendChart(container, fullRows, idx, domain) {
+    var allDates = [];
+    fullRows.forEach(function (r) { if (allDates.indexOf(r[idx.election_date]) === -1) allDates.push(r[idx.election_date]); });
+    allDates.sort();
+    if (allDates.length < 2) {
       container.remove();
       return;
     }
+    var allTimes = allDates.map(function (d) { return new Date(d + "T00:00:00Z").getTime(); });
+
+    // Zoomed in: narrow to the dates inside the selected range. If a drag
+    // somehow lands between two dates with none inside it, fall back to
+    // the full range rather than rendering an empty chart.
+    var dates = domain ? allDates.filter(function (d, i) { return allTimes[i] >= domain.t0 && allTimes[i] <= domain.t1; }) : allDates;
+    if (!dates.length) dates = allDates;
+    var rows = domain ? fullRows.filter(function (r) { return dates.indexOf(r[idx.election_date]) !== -1; }) : fullRows;
+
     var times = dates.map(function (d) { return new Date(d + "T00:00:00Z").getTime(); });
     var t0 = times[0], t1 = times[times.length - 1];
     var span = Math.max(t1 - t0, 1);
@@ -861,17 +954,22 @@
       crosshair.setAttribute("visibility", "hidden");
       tooltip.style.visibility = "hidden";
     });
+
+    attachDragZoom(svg, container, { ML: ML, MT: MT, plotW: plotW, plotH: plotH, t0: t0, span: span },
+      function (newT0, newT1) { buildTrendChart(container, fullRows, idx, { t0: newT0, t1: newT1 }); },
+      function () { buildTrendChart(container, fullRows, idx); });
+    if (domain) zoomResetButton(container, function () { buildTrendChart(container, fullRows, idx); });
   }
 
-  function mountMrpChart(ge2024Rows, mrpRows, localRows, showLocal) {
+  function mountMrpChart(ge2024Rows, mrpRows, localRows, showLocal, domain) {
     var container = document.getElementById("mrp-chart");
     if (!container) return;
 
-    var points = []; // {t, party, share, kind:'actual'|'projected'|'local', label, group}
+    var allPoints = []; // {t, party, share, kind:'actual'|'projected'|'local', label, group}
     if (ge2024Rows && ge2024Rows.length) {
       var gIdx = colIndex(COLS.ge2024);
       ge2024Rows.forEach(function (r) {
-        points.push({
+        allPoints.push({
           t: Date.parse("2024-07-04T00:00:00Z"), party: r[gIdx.party], share: r[gIdx.vote_share_pct],
           kind: "actual", label: "Actual result — GE2024 (4 Jul 2024)",
         });
@@ -880,7 +978,7 @@
     if (mrpRows && mrpRows.length) {
       var mIdx = colIndex(COLS.mrp);
       mrpRows.forEach(function (r) {
-        points.push({
+        allPoints.push({
           t: Date.parse(r[mIdx.publish_date] + "T00:00:00Z"), party: r[mIdx.party], share: r[mIdx.vote_share_pct],
           kind: "projected", label: r[mIdx.pollster] + " MRP (" + r[mIdx.publish_date] + ")",
         });
@@ -910,16 +1008,21 @@
         var g = localByPartyDate[key];
         var avg = g.shares.reduce(function (a, b) { return a + b; }, 0) / g.shares.length;
         var uniqueLas = g.las.filter(function (la, i) { return g.las.indexOf(la) === i; });
-        points.push({
+        allPoints.push({
           t: g.t, party: g.party, share: avg, kind: "local", group: g.party,
           label: (uniqueLas.length > 1 ? uniqueLas.join(" + ") + " (avg)" : uniqueLas[0]) + " local election (" + g.date + ")",
         });
       });
     }
-    if (points.length < 2) {
+    if (allPoints.length < 2) {
       container.innerHTML = '<p class="placeholder" style="padding:0.5rem 0;">Only one data point so far — need at least one MRP release plus GE2024, or two MRP releases, to chart a trend.</p>';
       return;
     }
+    // Zoomed in: narrow to points inside the selected range, falling back
+    // to the full set if the drag missed everything (same reasoning as
+    // buildTrendChart).
+    var points = domain ? allPoints.filter(function (p) { return p.t >= domain.t0 && p.t <= domain.t1; }) : allPoints;
+    if (points.length < 2) points = allPoints;
 
     var times = points.map(function (p) { return p.t; });
     var t0 = Math.min.apply(null, times), t1 = Math.max.apply(null, times);
@@ -1093,6 +1196,11 @@
       crosshair.setAttribute("visibility", "hidden");
       tooltip.style.visibility = "hidden";
     });
+
+    attachDragZoom(svg, container, { ML: ML, MT: MT, plotW: plotW, plotH: plotH, t0: t0, span: span },
+      function (newT0, newT1) { mountMrpChart(ge2024Rows, mrpRows, localRows, showLocal, { t0: newT0, t1: newT1 }); },
+      function () { mountMrpChart(ge2024Rows, mrpRows, localRows, showLocal); });
+    if (domain) zoomResetButton(container, function () { mountMrpChart(ge2024Rows, mrpRows, localRows, showLocal); });
   }
 
   function colIndex(names) {

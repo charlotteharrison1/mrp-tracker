@@ -111,7 +111,7 @@ def fetch_local_council(con, ward_pcon_map):
     ward_rows = con.execute(
         """
         SELECT le.election_date, v.ward_code, v.party, v.ward_vote_share_pct AS share,
-               le.page_url, le.source_url
+               v.seats_won_in_ward, le.page_url, le.source_url
         FROM local_election_ward_party_avg v
         JOIN local_election_events le ON le.election_id = v.election_id
         """
@@ -119,13 +119,15 @@ def fetch_local_council(con, ward_pcon_map):
 
     ward_universe = defaultdict(dict)              # (pcon, la, date) -> {ward_code: weight}
     party_ward_share = defaultdict(lambda: defaultdict(dict))  # (pcon, la, date) -> party -> {ward_code: share}
+    party_ward_seats = defaultdict(lambda: defaultdict(dict))  # (pcon, la, date) -> party -> {ward_code: seats_won}
     meta = {}                                       # (pcon, la, date) -> (page_url, source_url)
-    for date, ward_code, party, share, page_url, source_url in ward_rows:
+    for date, ward_code, party, share, seats_won, page_url, source_url in ward_rows:
         la_name = la_name_by_ward.get(ward_code)
         for pcon, weight in ward_pcon_map.get(ward_code, []):
             key = (pcon, la_name, date)
             ward_universe[key][ward_code] = weight
             party_ward_share[key][party][ward_code] = share
+            party_ward_seats[key][party][ward_code] = seats_won
             meta[key] = (page_url, source_url)
 
     by_pcon = defaultdict(list)
@@ -138,7 +140,14 @@ def fetch_local_council(con, ward_pcon_map):
         for party, ward_map in party_ward_share[key].items():
             weighted_sum = sum((ward_map.get(wc) or 0.0) * wt for wc, wt in weights.items())
             share = weighted_sum / total_weight
-            rows_for_key.append([la_name, date, party, round(share, 2), len(ward_map), page_url, source_url])
+            # Seats won: a straight sum, not weighted/averaged like the
+            # vote share — a split ward's council seat is a real seat
+            # regardless of what fraction of the ward's electorate sits
+            # in this constituency, and a multi-member ward can hand a
+            # party more than one seat there (each contested/won
+            # candidacy is its own row in the source data).
+            seats_won = sum(v or 0 for v in party_ward_seats[key][party].values())
+            rows_for_key.append([la_name, date, party, round(share, 2), len(ward_map), seats_won, page_url, source_url])
         rows_for_key.sort(key=lambda r: r[3], reverse=True)
         by_pcon[pcon].extend(rows_for_key)
     return by_pcon
@@ -271,7 +280,7 @@ def main():
             "columns": {
                 "ge2024": ["party", "candidate_name", "votes", "vote_share_pct", "rank", "source_url"],
                 "mrp": ["pollster", "publish_date", "party", "vote_share_pct", "rank", "win_probability_pct", "source_url", "data_url"],
-                "local_council": ["la_name", "election_date", "party", "avg_vote_share_pct", "n_wards", "source_url", "data_url"],
+                "local_council": ["la_name", "election_date", "party", "avg_vote_share_pct", "n_wards", "seats_won", "source_url", "data_url"],
                 "local_wards": ["la_name", "ward_name", "ward_code", "election_date", "party",
                                  "candidate_name", "votes", "vote_share_pct", "elected"],
             },
