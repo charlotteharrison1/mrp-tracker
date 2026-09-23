@@ -559,3 +559,52 @@ is for whichever session (or agent) picks this project up next.
   splits now. Fixing `wards` itself (adding pcon_code to its primary key)
   would ripple into every other join in the codebase and wasn't what was
   asked for here.
+- **2026-09-23 — backfilled 6 MRP releases from a user-supplied priority
+  list, closing most of a gap this project's own tracking had missed.**
+  Checking that list against `mrp_releases` found 9 of 18 items weren't
+  loaded — a real gap, not just the "not exhaustive" hedge already in
+  `docs/mrp_sources.md`. Found and ingested 6 (More in Common Dec 2024,
+  Focaldata/Hope Not Hate Feb 2025, YouGov Jun 2025, Stack Data Strategy
+  Aug 2025, YouGov Sep 2025, Convergent Jul 2026 — 2 of these are
+  entirely new pollsters for this dataset). Three new one-off prep
+  scripts (`prep_focaldata_xlsx.py`, `prep_stackdata_xlsx.py`,
+  `prep_convergent_xlsx.py`) plus generalising `prep_yougov_xlsx.py`
+  (see below). 3 remain unresolved (Survation Jul 2026, 2 further
+  Focaldata dates) — documented as blocked/not-found in
+  `docs/mrp_sources.md` rather than forced.
+  - **Recurring bug pattern, 3rd time now**: both Focaldata's and
+    Convergent's files repeat the same party codes verbatim in a SECOND
+    section of the same header row (Focaldata: "MRP vote shares" then
+    "Change since 2024"; Convergent: current shares then GE2024 actual
+    result) — a naive `{code: column_index}` dict built by scanning the
+    whole row keeps the LAST occurrence, silently pulling numbers from
+    the wrong section (caught immediately: Focaldata's Lab came out as
+    -7.41, a swing-since-2024 figure, not a ~33% vote share). Same root
+    cause as Electoral Calculus's "cost of living issues" section
+    documented earlier this project. Fixed both prep scripts the same
+    way: find where the second section starts and stop scanning there.
+    **Whenever a party code could plausibly appear twice on one header
+    row (a "current vs. change" or "prediction vs. actual" layout is a
+    very common one), check for this BEFORE writing the column-mapping
+    loop, not after seeing wrong numbers.**
+  - **`prep_yougov_xlsx.py` generalised**: YouGov has used three
+    different ID/name column naming schemes across the three releases
+    now loaded (`const`/`area` in 2024; `ONS_ID`/`Constituency` in Jun
+    2025; `ons_id24`/`const_name24` in Sep 2025) while keeping party
+    column names stable throughout. Rewrote to auto-detect from a list
+    of known aliases and to accept CSV as well as xlsx, rather than
+    hardcoding one scheme per pollster-file — the same lesson as the
+    LEAP/Wikipedia ward-matching work: a source's format drifting
+    release-to-release should be handled by detection, not by adding a
+    new hardcoded script per minor variation.
+  - **Dead links, recovered via Wayback Machine**: the More in Common
+    December 2024 page and its data file had both moved off
+    moreincommon.org.uk entirely (redirecting to the generic research
+    archive / 404 respectively) by the time this was found, ~21 months
+    later. Both were still retrievable from web.archive.org — worth
+    trying before giving up on an old link, especially for anything
+    published soon after a specific news cycle.
+  - **navigator_data.json is now ~25MB** (was ~19MB before this batch;
+    73,336 MRP rows now, up from 50,079) — flagged again as something to
+    watch; still loads and renders fine in testing, but this is the
+    biggest jump yet from a single batch of additions.
