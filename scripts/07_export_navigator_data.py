@@ -187,6 +187,104 @@ def fetch_local_wards(con, ward_pcon_map):
     return by_pcon
 
 
+def fetch_councils(con):
+    """One row per council (local authority) that has any local election
+    data loaded — the list for the navigator's 'browse by council'
+    view (the reverse of the constituency list). Nation is derived from
+    the la_code's first letter, same convention as constituencies."""
+    nation_prefix = {"E": "England", "S": "Scotland", "W": "Wales", "N": "Northern Ireland"}
+    rows = con.execute(
+        """SELECT DISTINCT w.la_code, w.la_name FROM wards w
+           WHERE w.la_code IN (SELECT DISTINCT la_code FROM local_election_events)
+           ORDER BY w.la_name"""
+    ).fetchall()
+    return [{"code": r[0], "name": r[1], "nation": nation_prefix.get(r[0][0], "")} for r in rows]
+
+
+def fetch_la_pcon_map(con, ward_pcon_map):
+    """la_code -> sorted list of pcon_codes it overlaps - the 'reverse'
+    lookup of ward_pcon_map, for the council view's "constituencies that
+    cross into this council" section."""
+    la_code_by_ward = dict(con.execute("SELECT ward_code, la_code FROM wards"))
+    la_to_pcons = defaultdict(set)
+    for ward_code, pcons in ward_pcon_map.items():
+        la_code = la_code_by_ward.get(ward_code)
+        if la_code:
+            for pcon, _weight in pcons:
+                la_to_pcons[la_code].add(pcon)
+    return {la: sorted(pcons) for la, pcons in la_to_pcons.items()}
+
+
+def fetch_by_la(con):
+    """Full council-wide local election results, over ALL of that
+    council's own wards — the reverse of fetch_local_council(), and
+    actually simpler: a ward belongs to exactly one council, never
+    split, so (unlike the constituency version) there's no overlap
+    weighting to do here at all. Same zero-fill principle still applies
+    (a party that didn't contest a ward counts as 0% there, not
+    excluded) so a council's shares still sum to ~100%."""
+    ward_rows = con.execute(
+        """
+        SELECT w.la_code, le.election_date, v.ward_code, v.party,
+               v.ward_vote_share_pct AS share, v.seats_won_in_ward,
+               le.page_url, le.source_url
+        FROM local_election_ward_party_avg v
+        JOIN local_election_events le ON le.election_id = v.election_id
+        JOIN wards w ON w.ward_code = v.ward_code
+        """
+    ).fetchall()
+
+    ward_universe = defaultdict(set)                            # (la, date) -> {ward_code}
+    party_ward_share = defaultdict(lambda: defaultdict(dict))    # (la, date) -> party -> {ward_code: share}
+    party_ward_seats = defaultdict(lambda: defaultdict(dict))    # (la, date) -> party -> {ward_code: seats_won}
+    meta = {}
+    for la_code, date, ward_code, party, share, seats_won, page_url, source_url in ward_rows:
+        key = (la_code, date)
+        ward_universe[key].add(ward_code)
+        party_ward_share[key][party][ward_code] = share
+        party_ward_seats[key][party][ward_code] = seats_won
+        meta[key] = (page_url, source_url)
+
+    by_la = defaultdict(list)
+    for key in sorted(ward_universe, key=lambda k: (k[0], k[1]), reverse=True):
+        la_code, date = key
+        n_total = len(ward_universe[key]) or 1
+        page_url, source_url = meta[key]
+        rows_for_key = []
+        for party, ward_map in party_ward_share[key].items():
+            share = sum(v or 0.0 for v in ward_map.values()) / n_total
+            seats_won = sum(v or 0 for v in party_ward_seats[key][party].values())
+            rows_for_key.append([date, party, round(share, 2), len(ward_map), seats_won, page_url, source_url])
+        rows_for_key.sort(key=lambda r: r[2], reverse=True)
+        by_la[la_code].extend(rows_for_key)
+    return by_la
+
+
+def fetch_la_wards(con):
+    """Raw candidate-level rows per council (not sliced by constituency)
+    — the council view's own ward-level drill-down, mirroring
+    fetch_local_wards()."""
+    rows = con.execute(
+        """
+        SELECT w.la_code, r.ward_name_raw, r.ward_code, le.election_date,
+               r.party, r.candidate_name, r.votes, r.vote_share_pct, r.elected
+        FROM local_election_ward_results r
+        JOIN local_election_events le ON le.election_id = r.election_id
+        JOIN wards w ON w.ward_code = r.ward_code
+        WHERE r.ward_code IS NOT NULL
+        """
+    ).fetchall()
+    by_la = defaultdict(list)
+    for la_code, ward_name, ward_code, date, party, candidate, votes, share, elected in rows:
+        by_la[la_code].append([ward_name, ward_code, date, party, candidate, votes, share, bool(elected)])
+    for la_code in by_la:
+        r = by_la[la_code]
+        r.sort(key=lambda x: x[5] or 0, reverse=True)  # votes desc
+        r.sort(key=lambda x: x[2], reverse=True)        # date desc
+        r.sort(key=lambda x: x[0])                      # ward_name asc
+    return by_la
+
+
 STATIC_SOURCES = [
     {
         "phase": 1, "dataset": "Ward → Westminster constituency → LAD lookup (July 2024 vintage)",
@@ -259,6 +357,11 @@ def main():
     local_wards = fetch_local_wards(con, ward_pcon_map)
     mrp_releases_meta = fetch_mrp_releases_meta(con)
 
+    councils = fetch_councils(con)
+    la_pcon_map = fetch_la_pcon_map(con, ward_pcon_map)
+    by_la_results = fetch_by_la(con)
+    by_la_wards = fetch_la_wards(con)
+
     pcons = [c["code"] for c in constituencies]
     by_pcon = {
         pcon: {
@@ -268,6 +371,14 @@ def main():
             "local_wards": local_wards.get(pcon, []),
         }
         for pcon in pcons
+    }
+    by_la = {
+        c["code"]: {
+            "results": by_la_results.get(c["code"], []),
+            "wards": by_la_wards.get(c["code"], []),
+            "pcons": la_pcon_map.get(c["code"], []),
+        }
+        for c in councils
     }
 
     n_unmatched_ward_rows = con.execute(
@@ -283,9 +394,13 @@ def main():
                 "local_council": ["la_name", "election_date", "party", "avg_vote_share_pct", "n_wards", "seats_won", "source_url", "data_url"],
                 "local_wards": ["la_name", "ward_name", "ward_code", "election_date", "party",
                                  "candidate_name", "votes", "vote_share_pct", "elected"],
+                "la_results": ["election_date", "party", "avg_vote_share_pct", "n_wards", "seats_won", "source_url", "data_url"],
+                "la_wards": ["ward_name", "ward_code", "election_date", "party",
+                              "candidate_name", "votes", "vote_share_pct", "elected"],
             },
             "counts": {
                 "constituencies": len(constituencies),
+                "councils": len(councils),
                 "ge2024_rows": sum(len(v) for v in ge2024.values()),
                 "mrp_rows": sum(len(v) for v in mrp.values()),
                 "local_council_rows": sum(len(v) for v in local_council.values()),
@@ -299,12 +414,14 @@ def main():
         },
         "constituencies": constituencies,
         "by_pcon": by_pcon,
+        "councils": councils,
+        "by_la": by_la,
     }
 
     OUT_PATH.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     size_mb = OUT_PATH.stat().st_size / 1_000_000
     print(f"Wrote {OUT_PATH} ({size_mb:.2f} MB)")
-    print(f"  {len(constituencies)} constituencies, "
+    print(f"  {len(constituencies)} constituencies, {len(councils)} councils, "
           f"{data['meta']['counts']['local_council_rows']} local-council rows, "
           f"{data['meta']['counts']['local_ward_rows']} ward-level rows, "
           f"{data['meta']['counts']['ge2024_rows']} GE2024 rows, "

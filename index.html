@@ -98,6 +98,13 @@
     flex-direction: column;
     min-height: 0;
   }
+  #view-toggle { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+  #view-toggle button {
+    flex: 1; padding: 0.55rem 0.4rem; font-size: 0.82rem; font-weight: 600;
+    border: none; border-bottom: 2px solid transparent; background: none;
+    color: var(--text-secondary); cursor: pointer;
+  }
+  #view-toggle button.active { color: var(--accent); border-bottom-color: var(--accent); }
   #search-wrap { flex-shrink: 0; padding: 0.75rem; border-bottom: 1px solid var(--border); }
   #search {
     width: 100%; padding: 0.5rem 0.7rem; font-size: 0.95rem;
@@ -125,6 +132,19 @@
   }
   #list button.item.selected .nation-tag { color: rgba(255,255,255,0.85); border-color: rgba(255,255,255,0.5); }
   #list .empty { padding: 1rem; color: var(--text-muted); font-size: 0.85rem; }
+  .council-pcon-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .council-pcon-item {
+    display: block; border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem;
+    text-decoration: none; color: var(--text-primary); background: var(--surface-raised);
+  }
+  .council-pcon-item:hover { border-color: var(--accent); }
+  .council-pcon-item .nation-tag {
+    display: inline-block; font-size: 0.65rem; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem;
+  }
+  .council-pcon-item .meta-line { display: block; color: var(--text-secondary); font-size: 0.82rem; margin-top: 0.15rem; }
+  .council-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--text-muted); cursor: pointer; }
+  .council-link:hover { color: var(--accent); border-color: var(--accent); }
   #detail-pane {
     flex: 1;
     min-width: 0;
@@ -242,6 +262,10 @@
 
 <div class="layout">
   <div id="sidebar">
+    <div id="view-toggle">
+      <button type="button" data-mode="pcon" class="active">Constituencies</button>
+      <button type="button" data-mode="la">Councils</button>
+    </div>
     <div id="search-wrap">
       <input id="search" type="text" placeholder="Search constituency…" autocomplete="off">
       <div id="filters"></div>
@@ -311,6 +335,7 @@
   var COLS = null;
   var selectedCode = null;
   var nationFilter = null;
+  var viewMode = "pcon"; // "pcon" (constituencies) or "la" (councils) - the sidebar list and what clicking an item opens
   var els = {
     search: document.getElementById("search"),
     filters: document.getElementById("filters"),
@@ -355,7 +380,7 @@
   function boot() {
     var c = DATA.meta.counts;
     els.headerMeta.textContent =
-      c.constituencies + " constituencies · " +
+      c.constituencies + " constituencies · " + c.councils + " councils · " +
       c.local_ward_rows + " local ward results · " +
       c.ge2024_rows + " GE2024 rows · " +
       c.mrp_rows + " MRP rows · generated " + DATA.meta.generated_at.slice(0, 10);
@@ -376,6 +401,10 @@
     els.search.addEventListener("input", renderList);
     renderList();
 
+    Array.prototype.forEach.call(document.querySelectorAll("#view-toggle button"), function (btn) {
+      btn.addEventListener("click", function () { setViewMode(btn.getAttribute("data-mode"), true); });
+    });
+
     els.sourcesToggle.addEventListener("click", function () { showSources(); });
 
     // Mobile master-detail: goes back to the list without touching the
@@ -392,7 +421,41 @@
   function applyHash() {
     var raw = decodeURIComponent(location.hash.replace(/^#/, ""));
     if (raw === "sources") { showSources(true); return; }
-    if (raw && DATA.by_pcon.hasOwnProperty(raw)) selectConstituency(raw, true);
+    if (raw.indexOf("la:") === 0) {
+      var laCode = raw.slice(3);
+      if (DATA.by_la.hasOwnProperty(laCode)) {
+        setViewMode("la", false);
+        selectCouncil(laCode, true);
+      }
+      return;
+    }
+    if (raw && DATA.by_pcon.hasOwnProperty(raw)) {
+      setViewMode("pcon", false);
+      selectConstituency(raw, true);
+    }
+  }
+
+  // Switches the sidebar between listing constituencies and listing
+  // councils - clearing the current selection/search/nation-filter
+  // since they'd otherwise point at the wrong list. `resetDetail` is
+  // false when a hash is about to immediately select something in the
+  // new mode anyway (no point flashing the placeholder first).
+  function setViewMode(mode, resetDetail) {
+    if (viewMode === mode) return;
+    viewMode = mode;
+    selectedCode = null;
+    els.search.value = "";
+    nationFilter = null;
+    Array.prototype.forEach.call(els.filters.children, function (b) { b.classList.remove("active"); });
+    Array.prototype.forEach.call(document.querySelectorAll("#view-toggle button"), function (b) {
+      b.classList.toggle("active", b.getAttribute("data-mode") === mode);
+    });
+    els.search.placeholder = mode === "la" ? "Search council…" : "Search constituency…";
+    renderList();
+    if (resetDetail) {
+      els.detail.innerHTML = '<p class="placeholder">Select a ' + (mode === "la" ? "council" : "constituency") + " on the left, or search by name.</p>";
+      els.detail.scrollTop = 0;
+    }
   }
 
   function showSources(fromHash) {
@@ -406,14 +469,15 @@
 
   function renderList() {
     var q = els.search.value.trim().toLowerCase();
-    var items = DATA.constituencies.filter(function (c) {
+    var sourceList = viewMode === "la" ? DATA.councils : DATA.constituencies;
+    var items = sourceList.filter(function (c) {
       if (nationFilter && c.nation !== nationFilter) return false;
       if (q && c.name.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
     els.list.innerHTML = "";
     if (!items.length) {
-      els.list.innerHTML = '<p class="empty">No constituencies match.</p>';
+      els.list.innerHTML = '<p class="empty">No ' + (viewMode === "la" ? "councils" : "constituencies") + " match.</p>";
       return;
     }
     var frag = document.createDocumentFragment();
@@ -421,7 +485,9 @@
       var btn = document.createElement("button");
       btn.className = "item" + (c.code === selectedCode ? " selected" : "");
       btn.innerHTML = escapeHtml(c.name) + '<span class="nation-tag">' + escapeHtml(shortNation(c.nation)) + "</span>";
-      btn.addEventListener("click", function () { selectConstituency(c.code); });
+      btn.addEventListener("click", function () {
+        if (viewMode === "la") selectCouncil(c.code); else selectConstituency(c.code);
+      });
       frag.appendChild(btn);
     });
     els.list.appendChild(frag);
@@ -431,13 +497,43 @@
     return { "England": "Eng", "Scotland": "Sco", "Wales": "Wal", "Northern Ireland": "NI" }[n] || n;
   }
 
+  var councilCodeByNameCache = null;
+  function councilCodeByName(name) {
+    if (!councilCodeByNameCache) {
+      councilCodeByNameCache = {};
+      DATA.councils.forEach(function (c) { councilCodeByNameCache[c.name] = c.code; });
+    }
+    return councilCodeByNameCache[name];
+  }
+  // A constituency's per-council block header links to that council's
+  // own full page (the "reversed" view) when we can resolve its code;
+  // falls back to plain text if a council name can't be matched (keeps
+  // this from ever hard-erroring on a naming mismatch).
+  function councilLinkHtml(laName) {
+    var code = councilCodeByName(laName);
+    if (!code) return escapeHtml(laName);
+    return '<a href="#la:' + encodeURIComponent(code) + '" class="council-link" data-la-code="' + escapeHtml(code) + '">' + escapeHtml(laName) + "</a>";
+  }
+
   function selectConstituency(code, fromHash) {
+    if (viewMode !== "pcon") setViewMode("pcon", false);
     selectedCode = code;
     renderList();
     renderDetail(code);
     document.querySelector(".layout").classList.add("showing-detail");
     if (!fromHash) {
       history.replaceState(null, "", "#" + encodeURIComponent(code));
+    }
+  }
+
+  function selectCouncil(code, fromHash) {
+    if (viewMode !== "la") setViewMode("la", false);
+    selectedCode = code;
+    renderList();
+    renderCouncilDetail(code);
+    document.querySelector(".layout").classList.add("showing-detail");
+    if (!fromHash) {
+      history.replaceState(null, "", "#la:" + encodeURIComponent(code));
     }
   }
 
@@ -464,12 +560,119 @@
     wireWardDetailToggles(d.local_wards);
     mountTrendCharts(d.local_council);
     mountMrpChart(d.ge2024, d.mrp, d.local_council, false);
+    Array.prototype.forEach.call(document.querySelectorAll(".council-link"), function (a) {
+      a.addEventListener("click", function (evt) {
+        evt.preventDefault();
+        selectCouncil(a.getAttribute("data-la-code"));
+      });
+    });
     var localToggle = document.getElementById("toggle-local-results");
     if (localToggle) {
       localToggle.addEventListener("change", function () {
         mountMrpChart(d.ge2024, d.mrp, d.local_council, localToggle.checked);
       });
     }
+  }
+
+  // The "reversed" view: a council's own full local election history
+  // (every one of its wards, not sliced to any one constituency - see
+  // fetch_by_la() in 07_export_navigator_data.py), followed by the list
+  // of constituencies it overlaps. Mirrors renderDetail()/mountMrpChart's
+  // structure where the data shapes allow (buildTrendChart is reused
+  // as-is), but doesn't try to force-fit the constituency page's MRP
+  // chart — a council has no MRP projections of its own.
+  function renderCouncilDetail(code) {
+    var c = DATA.councils.find(function (x) { return x.code === code; });
+    var d = DATA.by_la[code] || { results: [], wards: [], pcons: [] };
+    if (!c) { els.detail.innerHTML = '<p class="placeholder">Not found.</p>'; return; }
+
+    var html = "";
+    html += '<h1 class="pcon-name">' + escapeHtml(c.name) + "</h1>";
+    html += '<p class="subtitle">' + escapeHtml(c.nation) + " council</p>";
+
+    html += '<section><h2>Local election results — party vote share over time</h2>';
+    var idx = colIndex(COLS.la_results);
+    if (!d.results.length) {
+      html += '<p class="placeholder">No local election data loaded yet for this council.</p></section>';
+    } else {
+      html += '<div class="chart-wrap" id="la-trend-chart"></div>';
+      var rows = d.results.slice().sort(function (a, b) {
+        if (a[idx.election_date] !== b[idx.election_date]) return a[idx.election_date] < b[idx.election_date] ? 1 : -1;
+        return b[idx.avg_vote_share_pct] - a[idx.avg_vote_share_pct];
+      });
+      html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th>Wards contested</th><th>Seats won</th><th>Source</th></tr></thead><tbody>';
+      rows.forEach(function (r) {
+        var links = sourceLink(r[idx.source_url], "source") +
+          (r[idx.data_url] ? "<br>" + sourceLink(r[idx.data_url], "csv") : "");
+        html += "<tr><td>" + fmtDate(r[idx.election_date]) + "</td><td>" + partyChip(r[idx.party]) +
+          "</td><td>" + fmtPct(r[idx.avg_vote_share_pct]) + "</td><td>" + r[idx.n_wards] +
+          "</td><td>" + r[idx.seats_won] +
+          "</td><td class=\"source-col\">" + links + "</td></tr>";
+      });
+      html += "</tbody></table></div>";
+      if (d.wards.length) {
+        html += '<details class="ward-detail" data-la="' + escapeHtml(code) +
+          '"><summary>Show ' + d.wards.length + ' ward-level candidate results</summary><div class="ward-detail-body"></div></details>';
+      }
+      html += "</section>";
+    }
+
+    html += '<h2 class="group-heading">Constituencies crossing into this council</h2>';
+    if (!d.pcons.length) {
+      html += '<p class="placeholder">No constituency overlap data for this council.</p>';
+    } else {
+      html += '<p class="note">' + d.pcons.length + " constituenc" + (d.pcons.length === 1 ? "y" : "ies") +
+        " cross into " + escapeHtml(c.name) + " — click one to see its own full page.</p>";
+      html += '<div class="council-pcon-list">';
+      d.pcons.forEach(function (pconCode) {
+        var pc = DATA.constituencies.find(function (x) { return x.code === pconCode; });
+        if (!pc) return;
+        html += '<a href="#' + encodeURIComponent(pconCode) + '" class="council-pcon-item" data-pcon="' + pconCode + '">' +
+          "<strong>" + escapeHtml(pc.name) + '</strong><span class="nation-tag">' + escapeHtml(shortNation(pc.nation)) + "</span>" +
+          '<span class="meta-line">2024 MP: ' + escapeHtml(pc.mp || "—") + (pc.party ? " (" + partyChip(pc.party) + ")" : "") +
+          (pc.majority != null ? " · majority " + pc.majority.toLocaleString() : "") + "</span>" +
+          "</a>";
+      });
+      html += "</div>";
+    }
+
+    els.detail.innerHTML = html;
+    els.detail.scrollTop = 0;
+    wireCouncilWardDetailToggle(d.wards);
+    if (d.results.length) {
+      var container = document.getElementById("la-trend-chart");
+      if (container) buildTrendChart(container, d.results, idx);
+    }
+    Array.prototype.forEach.call(document.querySelectorAll(".council-pcon-item"), function (a) {
+      a.addEventListener("click", function (evt) {
+        evt.preventDefault();
+        selectConstituency(a.getAttribute("data-pcon"));
+      });
+    });
+  }
+
+  function wireCouncilWardDetailToggle(wardRows) {
+    var wardIdx = colIndex(COLS.la_wards);
+    var det = document.querySelector("details.ward-detail");
+    if (!det) return;
+    det.addEventListener("toggle", function () {
+      if (!det.open || det.dataset.rendered) return;
+      det.dataset.rendered = "1";
+      var rows = wardRows.slice().sort(function (a, b) {
+        if (a[wardIdx.ward_name] !== b[wardIdx.ward_name]) return a[wardIdx.ward_name] < b[wardIdx.ward_name] ? -1 : 1;
+        if (a[wardIdx.election_date] !== b[wardIdx.election_date]) return a[wardIdx.election_date] < b[wardIdx.election_date] ? 1 : -1;
+        return (b[wardIdx.votes] || 0) - (a[wardIdx.votes] || 0);
+      });
+      var html = "<table><thead><tr><th>Ward</th><th>Date</th><th>Candidate</th><th>Party</th><th>Votes</th><th>Share</th><th>Elected</th></tr></thead><tbody>";
+      rows.forEach(function (w) {
+        html += "<tr><td>" + escapeHtml(w[wardIdx.ward_name]) + "</td><td>" + fmtDate(w[wardIdx.election_date]) +
+          "</td><td>" + escapeHtml(w[wardIdx.candidate_name]) + "</td><td>" + partyChip(w[wardIdx.party]) +
+          "</td><td>" + (w[wardIdx.votes] == null ? "—" : w[wardIdx.votes].toLocaleString()) +
+          "</td><td>" + fmtPct(w[wardIdx.vote_share_pct]) + "</td><td>" + (w[wardIdx.elected] ? "✓" : "") + "</td></tr>";
+      });
+      html += "</tbody></table>";
+      det.querySelector(".ward-detail-body").innerHTML = html;
+    });
   }
 
   function renderGe2024(rows) {
@@ -574,7 +777,7 @@
         if (a[idx.election_date] !== b[idx.election_date]) return a[idx.election_date] < b[idx.election_date] ? 1 : -1;
         return b[idx.avg_vote_share_pct] - a[idx.avg_vote_share_pct];
       });
-      body += '<div class="council-block"><h3>' + escapeHtml(la) + " — party vote share over time</h3>";
+      body += '<div class="council-block"><h3>' + councilLinkHtml(la) + " — party vote share over time</h3>";
       body += '<div class="chart-wrap" data-chart-la="' + escapeHtml(la) + '"></div>';
       body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th>Wards contested</th><th>Seats won</th><th>Source</th></tr></thead><tbody>';
       rows.forEach(function (r) {
