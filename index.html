@@ -134,15 +134,24 @@
   #list .empty { padding: 1rem; color: var(--text-muted); font-size: 0.85rem; }
   .council-pcon-list { display: flex; flex-direction: column; gap: 0.5rem; }
   .council-pcon-item {
-    display: block; border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem;
-    text-decoration: none; color: var(--text-primary); background: var(--surface-raised);
+    border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text-primary); background: var(--surface-raised); overflow: hidden;
   }
   .council-pcon-item:hover { border-color: var(--accent); }
+  .council-pcon-item summary {
+    display: block; padding: 0.6rem 0.8rem; cursor: pointer; list-style: none;
+  }
+  .council-pcon-item summary::-webkit-details-marker { display: none; }
+  .council-pcon-item summary::before { content: "▸ "; color: var(--text-muted); }
+  .council-pcon-item[open] summary::before { content: "▾ "; }
   .council-pcon-item .nation-tag {
     display: inline-block; font-size: 0.65rem; color: var(--text-muted);
     border: 1px solid var(--border); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem;
   }
   .council-pcon-item .meta-line { display: block; color: var(--text-secondary); font-size: 0.82rem; margin-top: 0.15rem; }
+  .council-pcon-body { padding: 0 0.8rem 0.8rem; border-top: 1px solid var(--border); }
+  .council-pcon-body section { margin-bottom: 1rem; }
+  .council-pcon-body section:last-child { margin-bottom: 0; }
   .council-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--text-muted); cursor: pointer; }
   .council-link:hover { color: var(--accent); border-color: var(--accent); }
   #detail-pane {
@@ -627,11 +636,11 @@
       d.pcons.forEach(function (pconCode) {
         var pc = DATA.constituencies.find(function (x) { return x.code === pconCode; });
         if (!pc) return;
-        html += '<a href="#' + encodeURIComponent(pconCode) + '" class="council-pcon-item" data-pcon="' + pconCode + '">' +
+        html += '<details class="council-pcon-item" data-pcon="' + pconCode + '"><summary>' +
           "<strong>" + escapeHtml(pc.name) + '</strong><span class="nation-tag">' + escapeHtml(shortNation(pc.nation)) + "</span>" +
           '<span class="meta-line">2024 MP: ' + escapeHtml(pc.mp || "—") + (pc.party ? " (" + partyChip(pc.party) + ")" : "") +
           (pc.majority != null ? " · majority " + pc.majority.toLocaleString() : "") + "</span>" +
-          "</a>";
+          '</summary><div class="council-pcon-body"></div></details>';
       });
       html += "</div>";
     }
@@ -643,12 +652,48 @@
       var container = document.getElementById("la-trend-chart");
       if (container) buildTrendChart(container, d.results, idx);
     }
-    Array.prototype.forEach.call(document.querySelectorAll(".council-pcon-item"), function (a) {
-      a.addEventListener("click", function (evt) {
-        evt.preventDefault();
-        selectConstituency(a.getAttribute("data-pcon"));
+    // Expands in place (GE2024 result + latest MRP snapshot, both drawn
+    // straight from data already in memory — no chart/ID-bearing
+    // elements, so several of these can be open on the page at once
+    // without colliding) rather than navigating away and losing your
+    // place on the council page. A link inside still goes to the full
+    // page for anyone who wants the charts/history/ward drill-down.
+    Array.prototype.forEach.call(document.querySelectorAll(".council-pcon-item"), function (det) {
+      det.addEventListener("toggle", function () {
+        if (!det.open || det.dataset.rendered) return;
+        det.dataset.rendered = "1";
+        var pconCode = det.getAttribute("data-pcon");
+        var d2 = DATA.by_pcon[pconCode] || { ge2024: [], mrp: [] };
+        var body = renderGe2024(d2.ge2024) + renderMrpSummary(d2.mrp) +
+          '<p><a href="#' + encodeURIComponent(pconCode) + '" class="council-link" data-pcon-full="' + pconCode + '">View ' +
+          escapeHtml(DATA.constituencies.find(function (x) { return x.code === pconCode; }).name) + "'s full page →</a></p>";
+        det.querySelector(".council-pcon-body").innerHTML = body;
+        var link = det.querySelector("[data-pcon-full]");
+        if (link) link.addEventListener("click", function (evt) { evt.preventDefault(); selectConstituency(pconCode); });
       });
     });
+  }
+
+  // Compact latest-MRP snapshot for the council page's inline
+  // constituency drop-downs - just the most recent release's party
+  // chips, not the full chart/history (that's what "View full page" is
+  // for). Deliberately has no id-bearing elements since several of
+  // these can be expanded on the page at the same time.
+  function renderMrpSummary(mrpRows) {
+    if (!mrpRows.length) return '<p class="placeholder">No MRP releases loaded yet for this seat.</p>';
+    var idx = colIndex(COLS.mrp);
+    var latestDate = mrpRows.reduce(function (max, r) { return r[idx.publish_date] > max ? r[idx.publish_date] : max; }, mrpRows[0][idx.publish_date]);
+    var rows = mrpRows.filter(function (r) { return r[idx.publish_date] === latestDate; })
+      .sort(function (a, b) { return (a[idx.rank] || 99) - (b[idx.rank] || 99); });
+    var pollster = rows[0][idx.pollster];
+    var html = "<section><h3>Most recent MRP projection</h3>";
+    html += '<p class="meta-line">' + escapeHtml(pollster) + " · " + fmtDate(latestDate) + "</p>";
+    html += '<div class="stat-row">';
+    rows.forEach(function (r) {
+      html += '<div class="stat">' + partyChip(r[idx.party]) + "<strong>" + fmtPct(r[idx.vote_share_pct]) + "</strong></div>";
+    });
+    html += "</div></section>";
+    return html;
   }
 
   function wireCouncilWardDetailToggle(wardRows) {
