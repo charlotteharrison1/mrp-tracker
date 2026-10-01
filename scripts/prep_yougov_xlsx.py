@@ -44,6 +44,7 @@ DB_PATH = ROOT / "data" / "uk_elections.db"
 PARTY_MAP = {
     "conshare": "Con", "labshare": "Lab", "libdemshare": "LD", "snpshare": "SNP",
     "plaidshare": "PC", "greenshare": "Green", "reformshare": "RUK", "othersshare": "Other",
+    "restoreshare": "Restore",
 }
 CODE_COL_ALIASES = ["const", "ons_id", "ons_id24"]
 NAME_COL_ALIASES = ["area", "constituency", "const_name24"]
@@ -82,6 +83,28 @@ def main():
         sys.exit(f"Couldn't find a code/name column in header: {header}")
     party_cols = {PARTY_MAP[k]: i for i, k in enumerate(norm) if k in PARTY_MAP}
 
+    # A vote-share FRACTION can never exceed 1.0 - if any party cell
+    # anywhere has a bare value over 1.5 (buffer against float noise at
+    # exactly 1.0), every value in this file must already be on a 0-100
+    # scale, not 0-1. Decided once for the whole file. Found 2026-10-01:
+    # the Sep 2026 YouGov CSV switched to already-percent values (24
+    # meaning 24%) with nothing else to flag it - the same issue fixed
+    # in prep_more_in_common_xlsx.py's scan_is_already_percent() the
+    # same day, for the same reason.
+    already_pct = False
+    for row in rows[1:]:
+        for i in party_cols.values():
+            v = row[i] if i < len(row) else None
+            if isinstance(v, str):
+                v = float(v) if v.strip().replace(".", "", 1).replace("-", "", 1).isdigit() else None
+            if isinstance(v, (int, float)) and v is not None and v > 1.5:
+                already_pct = True
+                break
+        if already_pct:
+            break
+    if already_pct:
+        print("  Values are already on a 0-100 scale (not 0-1 fractions) - detected from a value > 1.5.")
+
     out_rows = []
     n_seats = 0
     n_code_mismatch = 0
@@ -99,7 +122,8 @@ def main():
                 share = float(share) if share.strip() else None
             if isinstance(share, (int, float)) and share:
                 out_rows.append({"pcon_code": code, "pcon_name": name, "party": our_party,
-                                  "vote_share_pct": round(share * 100, 3), "win_probability_pct": ""})
+                                  "vote_share_pct": round(share, 3) if already_pct else round(share * 100, 3),
+                                  "win_probability_pct": ""})
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

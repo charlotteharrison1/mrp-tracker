@@ -31,7 +31,7 @@ PARTY_MAP = {
     "conservative": "Con", "labour": "Lab", "liberal democrat": "LD",
     "reform uk": "RUK", "the green party": "Green", "green party": "Green", "green": "Green",
     "scottish national party snp": "SNP", "snp": "SNP",
-    "plaid cymru": "PC", "other": "Other",
+    "plaid cymru": "PC", "other": "Other", "restore britain": "Restore",
 }
 NON_PARTY_COLS = {"constituency", "winner", "change", "ge winner", "ge_winner", "margin"}
 CODE_COL_KEYS = {"constituency code"}
@@ -43,10 +43,30 @@ def normalise_key(name):
     return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
 
 
-def parse_share(val):
-    """Handles both a decimal fraction (0.07, from xlsx) and a percentage
-    string ('7%', from at least one release's csv) — returns a vote_share_pct
-    (0-100 scale) or None if empty/not a number."""
+def fix_mojibake(name):
+    """Repairs the specific, mechanical 'UTF-8 bytes decoded as Latin-1'
+    corruption (found 2026-10-01: the Sep 2026 release had 'Ynys MÃ´n'
+    baked into the xlsx itself for 'Ynys Môn', upstream of us — not
+    something we caused by reading it wrong). Round-tripping a STRING
+    through latin-1 encode -> utf-8 decode only succeeds if it really was
+    mojibake in the first place (ordinary text raises UnicodeDecodeError
+    and is returned unchanged), so this is safe to run unconditionally
+    on every seat name rather than only the one known-bad case."""
+    try:
+        return name.encode("latin-1").decode("utf-8")
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        return name
+
+
+def parse_share(val, already_pct):
+    """Handles a decimal fraction (0.07, most xlsx releases), a percentage
+    string ('7%', at least one release's csv), AND a bare already-a-
+    percentage number (8.2 meaning 8.2%, the Sep 2026 release — no
+    fraction, no '%' suffix, nothing to distinguish it from the other
+    xlsx releases except that its values are the wrong order of
+    magnitude if treated as a fraction). `already_pct` is decided once
+    per file by scan_is_already_percent(), not per cell, since a bare
+    number is genuinely ambiguous without that file-wide context."""
     if val is None or val == "":
         return None
     if isinstance(val, str):
@@ -60,7 +80,23 @@ def parse_share(val):
             val = float(val)
         except ValueError:
             return None
-    return round(val * 100, 3)
+    return round(val, 3) if already_pct else round(val * 100, 3)
+
+
+def scan_is_already_percent(rows, party_cols):
+    """A vote-share FRACTION can never exceed 1.0 - if any party column
+    anywhere in the file has a bare numeric value over 1.5 (a buffer
+    against float noise right at 1.0), every bare number in this file
+    must already be on a 0-100 scale, not a 0-1 fraction. Decided once
+    for the whole file, not per cell/row - found 2026-10-01 when a new
+    More in Common release switched to already-percent values with
+    nothing else to flag it."""
+    for row in rows[1:]:
+        for i in party_cols.values():
+            v = row[i] if i < len(row) else None
+            if isinstance(v, (int, float)) and v > 1.5:
+                return True
+    return False
 
 
 def read_rows(path, sheet):
@@ -130,19 +166,23 @@ def main():
     if unrecognised:
         print(f"  Party columns not in the fixed map, carried through verbatim: {unrecognised}")
 
+    already_pct = scan_is_already_percent(rows, party_cols)
+    if already_pct:
+        print("  Values are already on a 0-100 scale (not 0-1 fractions) - detected from a value > 1.5.")
+
     out_rows = []
     n_seats = 0
     for row in rows[1:]:
         if not row or not row[seat_col]:
             continue
-        seat_name = row[seat_col]
+        seat_name = fix_mojibake(row[seat_col])
         pcon_code = row[code_col].strip() if code_col is not None and row[code_col] else ""
         if pcon_code and pcon_code not in known_codes:
             n_code_mismatch += 1
             pcon_code = ""
         n_seats += 1
         for our_party, i in party_cols.items():
-            share = parse_share(row[i]) if i < len(row) else None
+            share = parse_share(row[i], already_pct) if i < len(row) else None
             if share:
                 out_rows.append({"pcon_code": pcon_code, "pcon_name": seat_name, "party": our_party,
                                   "vote_share_pct": share, "win_probability_pct": ""})

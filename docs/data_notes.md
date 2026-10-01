@@ -608,3 +608,60 @@ is for whichever session (or agent) picks this project up next.
     73,336 MRP rows now, up from 50,079) — flagged again as something to
     watch; still loads and renders fine in testing, but this is the
     biggest jump yet from a single batch of additions.
+- **2026-10-01 — backfilled 9 more MRP releases** (6 Electoral Calculus
+  ones found in an earlier "exhaustiveness" research pass but never
+  actually ingested, plus 3 brand-new September 2026 releases from
+  Electoral Calculus/More in Common/YouGov found scanning for recent
+  ones). navigator_data.json jumped again, 25MB -> 38.6MB, 110,398 MRP
+  rows now — this is the file-size concern raised previously
+  materialising for real; worth addressing (gzip is probably free on
+  GitHub Pages for anyone whose client sends Accept-Encoding, but hasn't
+  been verified) before adding another big batch like this one.
+  - **The Electoral Calculus prep script's column-mapping assumed EVERY
+    release has two full side-by-side scenario tables (With/No TV)** —
+    5 of the 6 backfilled releases (May/Jun 2024, Feb/Apr/Jun 2025) turned
+    out to have only ONE vote-share table with two separate "Predicted
+    Winner" columns pointing at the same shares (the TV adjustment only
+    changed the winner call back then, not a full parallel table) —
+    `cells.index("Seat Name", first_seat_col + 1)` crashed outright
+    looking for a second one that didn't exist. Also found: the minor-
+    party/indep columns the script assumed were always both present
+    aren't (Oct 2025 has "Indep/ Other" but no "Minor Party" at all) —
+    a bare dict lookup KeyError'd instead of just skipping the missing
+    one. Both fixed to degrade gracefully instead of assuming a fixed
+    shape — same lesson as every other recurring-format-drift bug in
+    this project, logged here again because it's now happened enough
+    times (LEAP, Wikipedia, YouGov, More in Common, now EC) that it's
+    worth stating as a general rule: **a pollster's own file format is
+    not a contract — detect structure, don't assume it, even for a
+    source you've successfully loaded before.**
+  - **4 Electoral Calculus seat names don't fuzzy-match our DB at all**
+    (recurring identically across all 7 EC files, since EC's own seat
+    list barely changes release to release): "Carmarthen" (EC uses the
+    English name; our ONS-sourced DB has the Welsh "Caerfyrddin" with no
+    fuzzy relationship between the two — scored 67.5 against the WRONG
+    seat, "Bath"), "Ashton under Lyne" (missing our DB's hyphens, scored
+    88.2, just under the 90 threshold), and "Ynys Mon (Anglesey)" /
+    "Na h-Eileanan An Iar (Western Isles)" (EC appends an English gloss
+    in parens and drops the Welsh/Gaelic diacritic — stripping the gloss
+    alone only got Ynys Mon to 87.5, still short). Fixed with a small
+    explicit `SEAT_NAME_ALIASES` dict in `prep_electoral_calculus_xlsx.py`
+    rather than loosening the shared 90-point threshold for every pollster.
+  - **Both a More in Common and a YouGov release switched to already-
+    percent values (24 meaning 24%) instead of 0-1 fractions**, with
+    nothing in the file to flag the change — caught immediately by the
+    vote-share-sum sanity check this project now runs on every new prep
+    (MiC summed to ~100% correctly once fixed; YouGov's bug produced a
+    ~9,998% sum before the fix, since it compounded with the existing
+    ×100 conversion). Both scripts now auto-detect the scale once per
+    file (any value over 1.5 proves the whole file can't be fractions)
+    rather than assuming one scale forever. **Running the sum check on
+    every new prep output, before ingesting, is what caught this in
+    minutes instead of it silently corrupting the chart.**
+  - **A genuine mojibake bug baked into More in Common's own source
+    file**: "Ynys Môn" was stored as "Ynys MÃ´n" (UTF-8 bytes decoded as
+    Latin-1, upstream of us, not something we caused reading it). Fixed
+    generically — round-tripping a string through
+    `.encode("latin-1").decode("utf-8")` only succeeds if it really was
+    this specific corruption, so it's safe to apply unconditionally to
+    every seat name rather than special-casing the one known-bad value.

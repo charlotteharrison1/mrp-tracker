@@ -41,6 +41,30 @@ DB_PATH = ROOT / "data" / "uk_elections.db"
 NATION_MATCH_THRESHOLD = 80
 
 PARTY_MAP = {"CON": "Con", "LAB": "Lab", "LIB": "LD", "Reform": "RUK", "Green": "Green"}
+# A handful of EC seat names that 04_ingest_mrp_release.py's own fuzzy
+# matcher (threshold 90) can't confidently place on their own — found
+# 2026-10-01 backfilling 7 releases, the same 4 names recurred
+# identically across ALL of them (EC's own seat-name list barely changes
+# release to release), so a small explicit map is cheaper and more
+# reliable than loosening the shared matcher's threshold for everyone.
+# Checked each by hand against `best_match()`'s own scoring:
+#   - "Ynys Mon (Anglesey)"/"Na h-Eileanan An Iar (Western Isles)": EC
+#     appends an English gloss in parens AND drops the Welsh/Gaelic
+#     diacritic; even after stripping the gloss, "Ynys Mon" only scores
+#     87.5 against "Ynys Môn" (needs the circumflex), so stripping alone
+#     isn't enough - mapped directly instead.
+#   - "Ashton under Lyne": missing the hyphens our DB's "Ashton-under-
+#     Lyne" has (score 88.2, just under threshold).
+#   - "Carmarthen": EC uses the English name; our DB (from the official
+#     ONS boundary review) uses the Welsh "Caerfyrddin" with no obvious
+#     fuzzy relationship between the two at all (scored 67.5 against the
+#     wrong seat, "Bath").
+SEAT_NAME_ALIASES = {
+    "Ynys Mon (Anglesey)": "Ynys Môn",
+    "Na h-Eileanan An Iar (Western Isles)": "Na h-Eileanan an Iar",
+    "Ashton under Lyne": "Ashton-under-Lyne",
+    "Carmarthen": "Caerfyrddin",
+}
 # Columns with a known, fixed meaning that aren't a simple party vote share —
 # skipped when scanning "everything else" in the sheet.
 NON_PARTY_COLS = {"seat name", "electorate", "turnout", "predicted winner (with tv)",
@@ -71,9 +95,17 @@ def build_column_map(cells):
     fake minor parties with 50%+ "vote share" if swept up by a naive
     "everything to the end of the row" slice. Bound each table by its own
     "Predicted Winner" sentinel column instead of by the next table's
-    start / the row's end."""
+    start / the row's end.
+
+    Earlier releases (confirmed: May/Jun 2024, Feb/Apr/Jun 2025) only
+    have ONE "Seat Name" at all — a single vote-share table with two
+    separate "Predicted Winner (no TV)"/"(with TV)" columns pointing at
+    the SAME shares (the tactical-voting adjustment only changed the
+    winner call back then, not a full parallel share table). In that
+    case there's nothing to split - both scenarios return the identical
+    column map, since we never read a "Predicted Winner" column anyway
+    (04_ingest_mrp_release.py computes rank from vote share itself)."""
     first_seat_col = cells.index("Seat Name")
-    second_seat_col = cells.index("Seat Name", first_seat_col + 1)
 
     def slice_cols(start, end):
         out = {}
@@ -82,6 +114,23 @@ def build_column_map(cells):
             if name:
                 out[name] = i
         return out
+
+    try:
+        second_seat_col = cells.index("Seat Name", first_seat_col + 1)
+    except ValueError:
+        # Bound the single table to its own "Predicted Winner" sentinel
+        # too, in case a third section (e.g. a survey-sentiment block —
+        # confirmed: the Feb 2025 file has a trailing "Better/Neutral/
+        # Worse" section on this same header row) follows it — same
+        # reasoning as the two-table case above, just for one table
+        # instead of two. Different single-table releases use different
+        # exact sentinel wording ("Predicted Winner" alone in Feb 2025,
+        # vs "Predicted Winner (no TV)"/"(with TV)" in May 2024) so try
+        # all three and take whichever is actually present.
+        end = next((cells.index(lbl) for lbl in ("Predicted Winner", "Predicted Winner (no TV)", "Predicted Winner (with TV)")
+                    if lbl in cells), len(cells))
+        single = slice_cols(first_seat_col, end)
+        return single, single
 
     def find_after(label, fallback):
         try:
@@ -162,6 +211,7 @@ def main():
     n_seats = 0
     for row in ws.iter_rows(min_row=header_row_num + 1, max_row=ws.max_row, values_only=True):
         seat_name = row[cols["seat name"]]
+        seat_name = SEAT_NAME_ALIASES.get(seat_name, seat_name)
         if not seat_name:
             continue
         n_seats += 1
@@ -173,7 +223,8 @@ def main():
                 out_rows.append({"pcon_code": "", "pcon_name": seat_name, "party": our_party,
                                   "vote_share_pct": round(share * 100, 3), "win_probability_pct": ""})
 
-        snp_plaid = row[cols["snp/\nplaid"]]
+        snp_plaid_col = cols.get("snp/\nplaid")
+        snp_plaid = row[snp_plaid_col] if snp_plaid_col is not None else None
         if snp_plaid:
             party = "SNP" if nation == "Scotland" else ("PC" if nation == "Wales" else None)
             if party is None:
@@ -183,7 +234,12 @@ def main():
                                   "vote_share_pct": round(snp_plaid * 100, 3), "win_probability_pct": ""})
 
         for src_name, our_party in [("minor party", "Minor"), ("indep/ other", "Ind/Other")]:
-            share = row[cols[src_name]]
+            # Not every release has both columns (e.g. Oct 2025 has
+            # "Indep/ Other" but no separate "Minor Party" line) —
+            # .get() instead of a bare lookup so a missing one is just
+            # skipped, not a KeyError.
+            col_i = cols.get(src_name)
+            share = row[col_i] if col_i is not None else None
             if share:
                 out_rows.append({"pcon_code": "", "pcon_name": seat_name, "party": our_party,
                                   "vote_share_pct": round(share * 100, 3), "win_probability_pct": ""})
