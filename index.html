@@ -195,6 +195,10 @@
   details.ward-detail { margin-top: 0.4rem; font-size: 0.85rem; }
   details.ward-detail summary { cursor: pointer; padding: 0.4rem 0.8rem; color: var(--accent); }
   details.ward-detail table { font-size: 0.8rem; }
+  details.full-data-toggle { margin-top: 0.5rem; }
+  details.full-data-toggle summary { cursor: pointer; padding: 0.4rem 0.8rem; color: var(--accent); font-size: 0.85rem; }
+  details.full-data-toggle summary:hover { color: var(--text-primary); }
+  details.full-data-toggle[open] summary { margin-bottom: 0.3rem; }
   .stat-row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
   .stat-row .stat { font-size: 0.85rem; color: var(--text-secondary); }
   .stat-row .stat strong { color: var(--text-primary); font-size: 1.1rem; display: block; }
@@ -604,6 +608,7 @@
         if (a[idx.election_date] !== b[idx.election_date]) return a[idx.election_date] < b[idx.election_date] ? 1 : -1;
         return b[idx.avg_vote_share_pct] - a[idx.avg_vote_share_pct];
       });
+      html += '<details class="full-data-toggle"><summary>Show full data (' + rows.length + " row" + (rows.length === 1 ? "" : "s") + ')</summary>';
       html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th>Wards contested</th><th>Seats won</th><th>Source</th></tr></thead><tbody>';
       rows.forEach(function (r) {
         var links = sourceLink(r[idx.source_url], "source") +
@@ -613,7 +618,7 @@
           "</td><td>" + r[idx.seats_won] +
           "</td><td class=\"source-col\">" + links + "</td></tr>";
       });
-      html += "</tbody></table></div>";
+      html += "</tbody></table></div></details>";
       if (d.wards.length) {
         html += '<details class="ward-detail" data-la="' + escapeHtml(code) +
           '"><summary>Show ' + d.wards.length + ' ward-level candidate results</summary><div class="ward-detail-body"></div></details>';
@@ -787,9 +792,9 @@
   function renderContendersBanner(mrpRows) {
     var info = computeTopContenders(mrpRows);
     if (!info) return "";
-    var html = '<div class="contenders-banner"><strong>Top contender' + (info.contenders.length > 1 ? "s" : "") + "</strong> " +
-      '<span class="text-muted">(latest MRP — ' + escapeHtml(info.pollster) + ", " + fmtDate(info.date) + "):</span> ";
+    var html = '<div class="contenders-banner"><strong>Top contender' + (info.contenders.length > 1 ? "s" : "") + ":</strong> ";
     html += info.contenders.map(function (c) { return partyChip(c.party) + " " + fmtPct(c.share); }).join(" vs ");
+    html += ' <span class="text-muted">(latest MRP — ' + escapeHtml(info.pollster) + ", " + fmtDate(info.date) + ")</span>";
     if (info.next) {
       html += ' <span class="text-muted">— ' + info.gap.toFixed(1) + "pt gap to " + partyChip(info.next.party) + " " + fmtPct(info.next.share) + "</span>";
     }
@@ -799,12 +804,12 @@
 
   function renderMrp(ge2024Rows, rows, localRows, chartId) {
     chartId = chartId || "mrp-chart";
-    var body = "<section><h2>MRP projections vs. actual, over time</h2>";
+    var body = renderContendersBanner(rows);
+    body += "<section><h2>MRP projections vs. actual, over time</h2>";
     if (!rows.length && !(ge2024Rows && ge2024Rows.length)) {
       body += '<p class="placeholder">No MRP releases loaded yet for this seat (Phase 4).</p></section>';
       return body;
     }
-    body += renderContendersBanner(rows);
     body += '<div class="marker-legend">' +
       '<span class="mk"><svg width="10" height="10"><path d="M5,0 L10,5 L5,10 L0,5 Z" fill="currentColor"></path></svg> Actual result (GE2024) — click a diamond to compare it across the whole chart</span>' +
       '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection</span>';
@@ -828,6 +833,7 @@
       if (!releases[key]) { releases[key] = []; order.push(key); }
       releases[key].push(r);
     });
+    body += '<details class="full-data-toggle"><summary>Show full data (' + order.length + " release" + (order.length === 1 ? "" : "s") + ')</summary>';
     body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Pollster</th><th>Parties (vote share)</th><th>Source</th></tr></thead><tbody>';
     order.forEach(function (key) {
       var group = releases[key].slice().sort(function (a, b) { return (a[idx.rank] || 99) - (b[idx.rank] || 99); });
@@ -840,7 +846,7 @@
       body += "<tr><td>" + escapeHtml(first[idx.publish_date]) + "</td><td>" + escapeHtml(first[idx.pollster]) +
         "</td><td>" + spread + "</td><td class=\"source-col\">" + links + "</td></tr>";
     });
-    body += "</tbody></table></div></section>";
+    body += "</tbody></table></div></details></section>";
     return body;
   }
 
@@ -873,6 +879,7 @@
       });
       body += '<div class="council-block"><h3>' + councilLinkHtml(la) + " — party vote share over time</h3>";
       body += '<div class="chart-wrap" data-chart-la="' + escapeHtml(la) + '"></div>';
+      body += '<details class="full-data-toggle"><summary>Show full data (' + rows.length + " row" + (rows.length === 1 ? "" : "s") + ')</summary>';
       body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th>Wards contested</th><th>Seats won</th><th>Source</th></tr></thead><tbody>';
       rows.forEach(function (r) {
         var links = sourceLink(r[idx.source_url], "source") +
@@ -882,7 +889,7 @@
           "</td><td>" + r[idx.seats_won] +
           "</td><td class=\"source-col\">" + links + "</td></tr>";
       });
-      body += "</tbody></table></div>";
+      body += "</tbody></table></div></details>";
 
       var wardsForCouncil = (wardRows || []).filter(function (w) { return w[wardIdx.la_name] === la; });
       if (wardsForCouncil.length) {
@@ -1114,10 +1121,11 @@
     var allDates = [];
     fullRows.forEach(function (r) { if (allDates.indexOf(r[idx.election_date]) === -1) allDates.push(r[idx.election_date]); });
     allDates.sort();
-    if (allDates.length < 2) {
+    if (!allDates.length) {
       container.remove();
       return;
     }
+    var singleDate = allDates.length === 1;
     var allTimes = allDates.map(function (d) { return new Date(d + "T00:00:00Z").getTime(); });
 
     // Zoomed in: narrow to the dates inside the selected range. If a drag
@@ -1150,7 +1158,9 @@
 
     var W = 640, H = 220, ML = 32, MR = 12, MT = 12, MB = 22;
     var plotW = W - ML - MR, plotH = H - MT - MB;
-    function xOf(di) { return ML + (times[di] - t0) / span * plotW; }
+    // A single election date has nothing to space out against — center
+    // its point in the plot rather than collapsing it to the left edge.
+    function xOf(di) { return singleDate ? ML + plotW / 2 : ML + (times[di] - t0) / span * plotW; }
     function yOf(share) { return MT + plotH - (share / yMax) * plotH; }
 
     var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none" });
