@@ -81,6 +81,11 @@
   .sources-page .card .title { font-weight: 600; margin-bottom: 0.2rem; }
   .sources-page .card .meta-line { color: var(--text-secondary); font-size: 0.82rem; margin-bottom: 0.3rem; }
   .sources-page .card .note { margin-top: 0.4rem; }
+  .contenders-banner {
+    background: var(--note-bg); border-left: 3px solid var(--note-border); border-radius: 0 6px 6px 0;
+    padding: 0.5rem 0.9rem; margin: 0.4rem 0 0.7rem; font-size: 0.9rem; line-height: 1.6;
+  }
+  .contenders-banner .party { font-weight: 600; }
   .marker-legend { display: flex; gap: 1.2rem; font-size: 0.78rem; color: var(--text-secondary); margin: 0.3rem 0 0.6rem; }
   .marker-legend .mk { display: inline-flex; align-items: center; gap: 0.3rem; }
   .local-toggle { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.4rem; cursor: pointer; font-weight: 500; }
@@ -711,6 +716,87 @@
       escapeHtml(label || "source") + " ↗</a>";
   }
 
+  // Numeric version of "look for the big gap in the chart": sort the
+  // LATEST MRP release's vote shares descending, then find the single
+  // biggest gap between consecutive ranks (searched only within the top
+  // ~6, so a coincidentally large gap way down in the also-ran tail -
+  // e.g. between two micro-parties splitting 2% and 0.1% - can't hijack
+  // the result). Everyone above that gap is a "contender", everyone
+  // below isn't. This is the same "elbow" idea used to choose a cluster
+  // count: it self-adjusts to the shape of the race rather than using a
+  // fixed threshold - a landslide puts the gap right after 1st (1
+  // contender), a clean two-horse race puts it after 2nd, a genuine
+  // four-way marginal puts it after 4th, because the real gap there is
+  // between the leading pack and the also-rans, not within the pack.
+  // Deliberately uses only the SINGLE latest release, not an average
+  // across history - this mirrors looking at the right-hand edge of the
+  // chart, not the whole trend; a noisy pollster can occasionally wobble
+  // the read, which is the tradeoff for not smoothing it away.
+  var SCAN_LIMIT = 5;
+  function computeTopContenders(mrpRows) {
+    if (!mrpRows || !mrpRows.length) return null;
+    var idx = colIndex(COLS.mrp);
+    var latestDate = mrpRows.reduce(function (max, r) { return r[idx.publish_date] > max ? r[idx.publish_date] : max; }, mrpRows[0][idx.publish_date]);
+    var atLatest = mrpRows.filter(function (r) { return r[idx.publish_date] === latestDate; });
+    // More than one pollster can publish on the exact same calendar date
+    // (found 2026-10-02: Electoral Calculus and YouGov both published
+    // 2026-09-24 for the same seat) - grouping by date alone would then
+    // dump two different releases' rows into one fake "release" with
+    // every party's share double-counted (summing to ~200%, not ~100%).
+    // Average each party's share across however many releases share the
+    // latest date instead - a no-op when there's only one, as there
+    // usually is, and a reasonable same-day cross-pollster blend when
+    // there's more than one, rather than an arbitrary pick between them.
+    var pollsters = [];
+    atLatest.forEach(function (r) { if (pollsters.indexOf(r[idx.pollster]) === -1) pollsters.push(r[idx.pollster]); });
+    // Generic catch-all buckets ("Other", "Ind/Other", "Minor" - a
+    // pollster's own grab-bag for every small party/independent it
+    // didn't model individually) never count as a "contender" even when
+    // large, since they're not one choosable thing a voter picked -
+    // found 2026-10-02 on Chorley (the Speaker's seat, which by
+    // convention other major parties don't contest, so most real votes
+    // land in exactly this bucket): without this filter it topped the
+    // banner ahead of Labour, implying a real challenger that isn't there.
+    var CATCHALL = { "Other": 1, "Ind/Other": 1, "Minor": 1 };
+    var byParty = {};
+    atLatest.forEach(function (r) {
+      if (CATCHALL[r[idx.party]]) return;
+      if (!byParty[r[idx.party]]) byParty[r[idx.party]] = [];
+      byParty[r[idx.party]].push(r[idx.vote_share_pct]);
+    });
+    var ranked = Object.keys(byParty).map(function (party) {
+      var shares = byParty[party];
+      return { party: party, share: shares.reduce(function (a, b) { return a + b; }, 0) / shares.length };
+    }).sort(function (a, b) { return b.share - a.share; });
+    var pollsterLabel = pollsters.join(" + ");
+    if (ranked.length < 2) {
+      return { contenders: ranked, next: null, gap: null, pollster: pollsterLabel, date: latestDate };
+    }
+    var scanLimit = Math.min(ranked.length - 1, SCAN_LIMIT);
+    var maxGap = -1, maxGapAt = 1;
+    for (var i = 0; i < scanLimit; i++) {
+      var gap = ranked[i].share - ranked[i + 1].share;
+      if (gap > maxGap) { maxGap = gap; maxGapAt = i + 1; }
+    }
+    return {
+      contenders: ranked.slice(0, maxGapAt), next: ranked[maxGapAt] || null, gap: maxGap,
+      pollster: pollsterLabel, date: latestDate,
+    };
+  }
+
+  function renderContendersBanner(mrpRows) {
+    var info = computeTopContenders(mrpRows);
+    if (!info) return "";
+    var html = '<div class="contenders-banner"><strong>Top contender' + (info.contenders.length > 1 ? "s" : "") + "</strong> " +
+      '<span class="text-muted">(latest MRP — ' + escapeHtml(info.pollster) + ", " + fmtDate(info.date) + "):</span> ";
+    html += info.contenders.map(function (c) { return partyChip(c.party) + " " + fmtPct(c.share); }).join(" vs ");
+    if (info.next) {
+      html += ' <span class="text-muted">— ' + info.gap.toFixed(1) + "pt gap to " + partyChip(info.next.party) + " " + fmtPct(info.next.share) + "</span>";
+    }
+    html += "</div>";
+    return html;
+  }
+
   function renderMrp(ge2024Rows, rows, localRows, chartId) {
     chartId = chartId || "mrp-chart";
     var body = "<section><h2>MRP projections vs. actual, over time</h2>";
@@ -718,6 +804,7 @@
       body += '<p class="placeholder">No MRP releases loaded yet for this seat (Phase 4).</p></section>';
       return body;
     }
+    body += renderContendersBanner(rows);
     body += '<div class="marker-legend">' +
       '<span class="mk"><svg width="10" height="10"><path d="M5,0 L10,5 L5,10 L0,5 Z" fill="currentColor"></path></svg> Actual result (GE2024) — click a diamond to compare it across the whole chart</span>' +
       '<span class="mk"><svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="currentColor"></circle></svg> MRP projection</span>';
