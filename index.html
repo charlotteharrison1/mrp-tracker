@@ -1153,15 +1153,22 @@
     Array.prototype.forEach.call(document.querySelectorAll(".chart-wrap[data-chart-la]"), function (wrap) {
       var la = wrap.getAttribute("data-chart-la");
       var rows = localCouncilRows.filter(function (r) { return r[idx.la_name] === la; });
-      buildTrendChart(wrap, rows, idx);
+      // requireMultiple: true here only - these per-council blocks sit
+      // under the constituency's own main MRP chart, where a lone-point
+      // "trend" for one council adds clutter without telling you
+      // anything a trend line would. The council view's OWN chart (this
+      // council's full history, via the other buildTrendChart call site)
+      // still shows a single-election council, since there it IS the
+      // main chart rather than a secondary breakdown.
+      buildTrendChart(wrap, rows, idx, null, true);
     });
   }
 
-  function buildTrendChart(container, fullRows, idx, domain) {
+  function buildTrendChart(container, fullRows, idx, domain, requireMultiple) {
     var allDates = [];
     fullRows.forEach(function (r) { if (allDates.indexOf(r[idx.election_date]) === -1) allDates.push(r[idx.election_date]); });
     allDates.sort();
-    if (!allDates.length) {
+    if (!allDates.length || (requireMultiple && allDates.length < 2)) {
       container.remove();
       return;
     }
@@ -1303,9 +1310,9 @@
     });
 
     attachDragZoom(svg, container, { ML: ML, MT: MT, plotW: plotW, plotH: plotH, t0: t0, span: span },
-      function (newT0, newT1) { buildTrendChart(container, fullRows, idx, { t0: newT0, t1: newT1 }); },
-      function () { buildTrendChart(container, fullRows, idx); });
-    if (domain) zoomResetButton(container, function () { buildTrendChart(container, fullRows, idx); });
+      function (newT0, newT1) { buildTrendChart(container, fullRows, idx, { t0: newT0, t1: newT1 }, requireMultiple); },
+      function () { buildTrendChart(container, fullRows, idx, null, requireMultiple); });
+    if (domain) zoomResetButton(container, function () { buildTrendChart(container, fullRows, idx, null, requireMultiple); });
   }
 
   function mountMrpChart(ge2024Rows, mrpRows, localRows, showLocal, domain, containerId) {
