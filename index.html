@@ -754,15 +754,15 @@
     // there's more than one, rather than an arbitrary pick between them.
     var pollsters = [];
     atLatest.forEach(function (r) { if (pollsters.indexOf(r[idx.pollster]) === -1) pollsters.push(r[idx.pollster]); });
-    // Generic catch-all buckets ("Other", "Ind/Other", "Minor" - a
-    // pollster's own grab-bag for every small party/independent it
-    // didn't model individually) never count as a "contender" even when
-    // large, since they're not one choosable thing a voter picked -
-    // found 2026-10-02 on Chorley (the Speaker's seat, which by
-    // convention other major parties don't contest, so most real votes
-    // land in exactly this bucket): without this filter it topped the
-    // banner ahead of Labour, implying a real challenger that isn't there.
-    var CATCHALL = { "Other": 1, "Ind/Other": 1, "Minor": 1 };
+    // Multi-party grab-bags ("Ind/Other", "Minor" - a pollster's own
+    // bucket lumping together several small parties/independents it
+    // didn't model individually) never count as a "contender", since
+    // they're not one choosable thing a voter picked. "Other" is kept in
+    // (per user request) even though it's also often a catch-all, since
+    // excluding it hid real cases where it's the dominant non-major-party
+    // option (e.g. Chorley, the Speaker's seat, where most real votes
+    // land there).
+    var CATCHALL = { "Ind/Other": 1, "Minor": 1 };
     var byParty = {};
     atLatest.forEach(function (r) {
       if (CATCHALL[r[idx.party]]) return;
