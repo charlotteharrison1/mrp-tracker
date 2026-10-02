@@ -611,6 +611,8 @@
       });
       html += '<details class="full-data-toggle"><summary>Show full data (' + rows.length + " row" + (rows.length === 1 ? "" : "s") + ')</summary>';
       html += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th>Wards contested</th><th>Seats won</th><th>Source</th></tr></thead><tbody>';
+      // Collapsed by default - this is the council view, where the chart
+      // above is the headline and the raw table is secondary detail.
       rows.forEach(function (r) {
         var links = sourceLink(r[idx.source_url], "source") +
           (r[idx.data_url] ? "<br>" + sourceLink(r[idx.data_url], "csv") : "");
@@ -641,7 +643,7 @@
         html += '<h3>' + escapeHtml(pc.name) + '<span class="nation-tag">' + escapeHtml(shortNation(pc.nation)) + "</span></h3>";
         html += '<p class="subtitle">2024 MP: ' + escapeHtml(pc.mp || "—") + (pc.party ? " (" + partyChip(pc.party) + ")" : "") +
           (pc.majority != null ? " · majority " + pc.majority.toLocaleString() : "") + "</p>";
-        html += renderMrp(d2.ge2024, d2.mrp, null, "mrp-chart-" + pconCode, d2.local_council);
+        html += renderMrp(d2.ge2024, d2.mrp, null, "mrp-chart-" + pconCode, d2.local_council, false);
         html += renderGe2024(d2.ge2024);
         html += '<p><a href="#' + encodeURIComponent(pconCode) + '" class="council-link" data-pcon-full="' + pconCode +
           '">Full page for ' + escapeHtml(pc.name) + " (local election breakdown, ward-level detail) →</a></p>";
@@ -838,8 +840,13 @@
     return html;
   }
 
-  function renderMrp(ge2024Rows, rows, localRows, chartId, bannerLocalRows) {
+  function renderMrp(ge2024Rows, rows, localRows, chartId, bannerLocalRows, tableOpen) {
     chartId = chartId || "mrp-chart";
+    // tableOpen defaults to true (the constituency view, where this is
+    // the main page's own data) - the council view's embedded mini MRP
+    // charts pass false, since there the table is secondary detail under
+    // someone else's main chart (the council's own local results).
+    if (tableOpen === undefined) tableOpen = true;
     // bannerLocalRows lets a caller feed the "top local contender" line
     // local election data without also turning on the chart-overlay
     // toggle below (e.g. the council view's embedded mini MRP charts,
@@ -873,7 +880,7 @@
       if (!releases[key]) { releases[key] = []; order.push(key); }
       releases[key].push(r);
     });
-    body += '<details class="full-data-toggle"><summary>Show full data (' + order.length + " release" + (order.length === 1 ? "" : "s") + ')</summary>';
+    body += '<details class="full-data-toggle"' + (tableOpen ? " open" : "") + '><summary>Show full data (' + order.length + " release" + (order.length === 1 ? "" : "s") + ')</summary>';
     body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Pollster</th><th>Parties (vote share)</th><th>Source</th></tr></thead><tbody>';
     order.forEach(function (key) {
       var group = releases[key].slice().sort(function (a, b) { return (a[idx.rank] || 99) - (b[idx.rank] || 99); });
@@ -919,7 +926,9 @@
       });
       body += '<div class="council-block"><h3>' + councilLinkHtml(la) + " — party vote share over time</h3>";
       body += '<div class="chart-wrap" data-chart-la="' + escapeHtml(la) + '"></div>';
-      body += '<details class="full-data-toggle"><summary>Show full data (' + rows.length + " row" + (rows.length === 1 ? "" : "s") + ')</summary>';
+      // Open by default - this section only appears on the constituency
+      // view, where the table is as central as the chart above it.
+      body += '<details class="full-data-toggle" open><summary>Show full data (' + rows.length + " row" + (rows.length === 1 ? "" : "s") + ')</summary>';
       body += '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Party</th><th>Avg. ward share</th><th>Wards contested</th><th>Seats won</th><th>Source</th></tr></thead><tbody>';
       rows.forEach(function (r) {
         var links = sourceLink(r[idx.source_url], "source") +
