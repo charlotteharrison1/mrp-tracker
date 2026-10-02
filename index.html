@@ -85,6 +85,7 @@
     background: var(--note-bg); border-left: 3px solid var(--note-border); border-radius: 0 6px 6px 0;
     padding: 0.5rem 0.9rem; margin: 0.4rem 0 0.7rem; font-size: 0.9rem; line-height: 1.6;
   }
+  .contenders-banner .cb-line + .cb-line { margin-top: 0.15rem; }
   .contenders-banner .party { font-weight: 600; }
   .marker-legend { display: flex; gap: 1.2rem; font-size: 0.78rem; color: var(--text-secondary); margin: 0.3rem 0 0.6rem; }
   .marker-legend .mk { display: inline-flex; align-items: center; gap: 0.3rem; }
@@ -635,12 +636,12 @@
       d.pcons.forEach(function (pconCode) {
         var pc = DATA.constituencies.find(function (x) { return x.code === pconCode; });
         if (!pc) return;
-        var d2 = DATA.by_pcon[pconCode] || { ge2024: [], mrp: [] };
+        var d2 = DATA.by_pcon[pconCode] || { ge2024: [], mrp: [], local_council: [] };
         html += '<div class="council-pcon-block">';
         html += '<h3>' + escapeHtml(pc.name) + '<span class="nation-tag">' + escapeHtml(shortNation(pc.nation)) + "</span></h3>";
         html += '<p class="subtitle">2024 MP: ' + escapeHtml(pc.mp || "—") + (pc.party ? " (" + partyChip(pc.party) + ")" : "") +
           (pc.majority != null ? " · majority " + pc.majority.toLocaleString() : "") + "</p>";
-        html += renderMrp(d2.ge2024, d2.mrp, null, "mrp-chart-" + pconCode);
+        html += renderMrp(d2.ge2024, d2.mrp, null, "mrp-chart-" + pconCode, d2.local_council);
         html += renderGe2024(d2.ge2024);
         html += '<p><a href="#' + encodeURIComponent(pconCode) + '" class="council-link" data-pcon-full="' + pconCode +
           '">Full page for ' + escapeHtml(pc.name) + " (local election breakdown, ward-level detail) →</a></p>";
@@ -789,22 +790,61 @@
     };
   }
 
-  function renderContendersBanner(mrpRows) {
+  // Whoever is leading at the most recent local election date covering
+  // this seat (averaged across councils the same way the chart does, for
+  // a seat spanning more than one). Just the single leader, not a
+  // gap-based list - local elections are a different race entirely
+  // (ward/council-level, different turnout and parties standing), so
+  // it's a separate read rather than part of the Westminster gap method.
+  function computeTopLocalContender(localRows) {
+    if (!localRows || !localRows.length) return null;
+    var idx = colIndex(COLS.local_council);
+    var latestDate = localRows.reduce(function (max, r) { return r[idx.election_date] > max ? r[idx.election_date] : max; }, localRows[0][idx.election_date]);
+    var atLatest = localRows.filter(function (r) { return r[idx.election_date] === latestDate; });
+    var byParty = {};
+    atLatest.forEach(function (r) {
+      if (!byParty[r[idx.party]]) byParty[r[idx.party]] = [];
+      byParty[r[idx.party]].push(r[idx.avg_vote_share_pct]);
+    });
+    var ranked = Object.keys(byParty).map(function (party) {
+      var shares = byParty[party];
+      return { party: party, share: shares.reduce(function (a, b) { return a + b; }, 0) / shares.length };
+    }).sort(function (a, b) { return b.share - a.share; });
+    if (!ranked.length) return null;
+    var councils = [];
+    atLatest.forEach(function (r) { if (councils.indexOf(r[idx.la_name]) === -1) councils.push(r[idx.la_name]); });
+    return { leader: ranked[0], date: latestDate, councils: councils };
+  }
+
+  function renderContendersBanner(mrpRows, localRows) {
     var info = computeTopContenders(mrpRows);
-    if (!info) return "";
-    var html = '<div class="contenders-banner"><strong>Top contender' + (info.contenders.length > 1 ? "s" : "") + ":</strong> ";
-    html += info.contenders.map(function (c) { return partyChip(c.party) + " " + fmtPct(c.share); }).join(" vs ");
-    html += ' <span class="text-muted">(latest MRP — ' + escapeHtml(info.pollster) + ", " + fmtDate(info.date) + ")</span>";
-    if (info.next) {
-      html += ' <span class="text-muted">— ' + info.gap.toFixed(1) + "pt gap to " + partyChip(info.next.party) + " " + fmtPct(info.next.share) + "</span>";
+    var localInfo = computeTopLocalContender(localRows);
+    if (!info && !localInfo) return "";
+    var html = '<div class="contenders-banner">';
+    if (info) {
+      html += '<div class="cb-line"><strong>Top Westminster contender' + (info.contenders.length > 1 ? "s" : "") + ":</strong> ";
+      html += info.contenders.map(function (c) { return partyChip(c.party) + " " + fmtPct(c.share); }).join(" vs ");
+      html += ' <span class="text-muted">(latest MRP — ' + escapeHtml(info.pollster) + ", " + fmtDate(info.date) + ")</span>";
+      if (info.next) {
+        html += ' <span class="text-muted">— ' + info.gap.toFixed(1) + "pt gap to " + partyChip(info.next.party) + " " + fmtPct(info.next.share) + "</span>";
+      }
+      html += "</div>";
+    }
+    if (localInfo) {
+      html += '<div class="cb-line"><strong>Top local contender:</strong> ' + partyChip(localInfo.leader.party) + " " + fmtPct(localInfo.leader.share) +
+        ' <span class="text-muted">(latest local election — ' + escapeHtml(localInfo.councils.join(" + ")) + ", " + fmtDate(localInfo.date) + ")</span></div>";
     }
     html += "</div>";
     return html;
   }
 
-  function renderMrp(ge2024Rows, rows, localRows, chartId) {
+  function renderMrp(ge2024Rows, rows, localRows, chartId, bannerLocalRows) {
     chartId = chartId || "mrp-chart";
-    var body = renderContendersBanner(rows);
+    // bannerLocalRows lets a caller feed the "top local contender" line
+    // local election data without also turning on the chart-overlay
+    // toggle below (e.g. the council view's embedded mini MRP charts,
+    // which deliberately skip that toggle but still have the data).
+    var body = renderContendersBanner(rows, bannerLocalRows === undefined ? localRows : bannerLocalRows);
     body += "<section><h2>MRP projections vs. actual, over time</h2>";
     if (!rows.length && !(ge2024Rows && ge2024Rows.length)) {
       body += '<p class="placeholder">No MRP releases loaded yet for this seat (Phase 4).</p></section>';
