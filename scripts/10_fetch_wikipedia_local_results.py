@@ -57,6 +57,10 @@ PARTY_MAP = {
     "scottish national party": "SNP", "snp": "SNP", "plaid cymru": "PC",
     "trade unionist and socialist coalition": "TUSC", "tusc": "TUSC", "ukip": "UKIP",
     "heritage party": "Heritage", "yorkshire party": "Yorks",
+    # Found 2026-10-02: some council result pages abbreviate to "Your" in
+    # the infobox instead of the full "Your Party" - same split-legend
+    # problem as the Grn/Green case documented in docs/party_codes.md.
+    "your": "Your Party", "your party": "Your Party",
 }
 
 

@@ -69,7 +69,16 @@ SEAT_NAME_ALIASES = {
 # skipped when scanning "everything else" in the sheet.
 NON_PARTY_COLS = {"seat name", "electorate", "turnout", "predicted winner (with tv)",
                    "predicted winner (no tv)", "winner 2024"}
-SPECIAL_PARTY_COLS = {"snp/\nplaid": "SNP/Plaid", "minor party": "Minor", "indep/ other": "Ind/Other"}
+# "indept." (not "indep/ other") only ever seen in the 2024-06-26 release —
+# that release tracked NAMED independent candidates as their own column,
+# separate from a generic "Other" catch-all also present in the same sheet
+# (confirmed 2026-10-02: Islington North/Rochdale/Birmingham Ladywood etc.
+# had both an "Other" row AND an "Indept." row that release, with "Indept."
+# carrying the real Corbyn/Galloway/Gaza-independent vote share — these are
+# the same people GE2024's actual results code as "Ind", so map it there
+# too rather than "Ind/Other", which later Electoral Calculus releases use
+# as a genuinely combined independents+minor-parties bucket).
+SPECIAL_PARTY_COLS = {"snp/\nplaid": "SNP/Plaid", "minor party": "Minor", "indep/ other": "Ind/Other", "indept.": "Ind"}
 
 
 def find_header_row(ws):
@@ -233,7 +242,7 @@ def main():
                 out_rows.append({"pcon_code": "", "pcon_name": seat_name, "party": party,
                                   "vote_share_pct": round(snp_plaid * 100, 3), "win_probability_pct": ""})
 
-        for src_name, our_party in [("minor party", "Minor"), ("indep/ other", "Ind/Other")]:
+        for src_name, our_party in [("minor party", "Minor"), ("indep/ other", "Ind/Other"), ("indept.", "Ind")]:
             # Not every release has both columns (e.g. Oct 2025 has
             # "Indep/ Other" but no separate "Minor Party" line) —
             # .get() instead of a bare lookup so a missing one is just

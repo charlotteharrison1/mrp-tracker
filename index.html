@@ -757,18 +757,21 @@
     // there's more than one, rather than an arbitrary pick between them.
     var pollsters = [];
     atLatest.forEach(function (r) { if (pollsters.indexOf(r[idx.pollster]) === -1) pollsters.push(r[idx.pollster]); });
-    // Multi-party grab-bags ("Ind/Other", "Minor" - a pollster's own
-    // bucket lumping together several small parties/independents it
-    // didn't model individually) never count as a "contender", since
-    // they're not one choosable thing a voter picked. "Other" is kept in
-    // (per user request) even though it's also often a catch-all, since
-    // excluding it hid real cases where it's the dominant non-major-party
-    // option (e.g. Chorley, the Speaker's seat, where most real votes
-    // land there).
-    var CATCHALL = { "Ind/Other": 1, "Minor": 1 };
+    // No code-based exclusion for generic buckets ("Other", "Ind/Other",
+    // "Minor") - confirmed 2026-10-02 (see docs/party_codes.md) that these
+    // aren't reliably "a mix of small also-rans": for a seat with one
+    // dominant non-major-party figure (Chorley's Speaker convention,
+    // Islington North's long-standing independent), the whole bucket can
+    // BE that one real, choosable thing, and which generic code a
+    // pollster happens to file it under drifts release to release (the
+    // same Islington North seat shows up as "Indept.", "Ind/Other",
+    // "Minor", and "Other" across different Electoral Calculus releases
+    // alone). A code-based filter can't tell these apart from a genuine
+    // assortment of small parties sharing the same label; the gap-based
+    // elbow method below already does that job on magnitude, same as for
+    // every named party, so it's left to do it here too.
     var byParty = {};
     atLatest.forEach(function (r) {
-      if (CATCHALL[r[idx.party]]) return;
       if (!byParty[r[idx.party]]) byParty[r[idx.party]] = [];
       byParty[r[idx.party]].push(r[idx.vote_share_pct]);
     });
